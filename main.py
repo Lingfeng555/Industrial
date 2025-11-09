@@ -10,7 +10,7 @@ def main(args: argparse.Namespace):
     print("Cargando datos desde:", splits)
 
     dataset = ONCEDataset(data_path=args.data_path, split=splits[0], data_type="camera", level="record")
-    dataset = ONCEDataset(data_path=args.data_path, split=splits[0], data_type="lidar", level="capture")
+    dataset = ONCEDataset(data_path=args.data_path, split=splits[0], data_type="lidar", level="frame")
     ...
 
 if __name__ == "__main__":

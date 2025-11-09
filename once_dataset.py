@@ -10,19 +10,28 @@ LIDAR_FOLDER_NAME = "lidar_roof"
 
 class ONCEDataset(Dataset):
 
+    # Builder variables
     data_path: str
     annotation_path: str
     level : Literal["frame", "record"]
     data_type : Literal["camera", "lidar"]
     split: Literal["train", "val", "test"]
     
-    logger: CustomLogger
-
+    # Internal variables
     cameras_paths: list[str]
     lidar_paths: list[str]
     annotation_paths: list[str]
-    
     annotation_dicts: list[dict]
+
+    # Internal variables
+    logger: CustomLogger
+
+    # Meta data
+    image_dimension: tuple = (1920, 1020)
+    time_labels: list[str] = ["morning", "noon", "afternoon", "night"]
+    weather_labels: list[str] = ["sunny", "cloudy", "rainy"]
+    area_labels: list[str] = ["downtown", "suburbs","tunnel","highway","bridge"]
+    entity_labels: list[str] = ['Car', 'Truck', 'Bus', 'Pedestrian', 'Cyclist']
 
     def __init__(self, 
                  data_path: str, 
@@ -31,6 +40,9 @@ class ONCEDataset(Dataset):
                  level: Literal["frame", "record"], 
                  logger_name: str = "ONCEDataset", 
                  show_logs: bool = True):
+        '''
+
+        '''
 
         # Initialize dataset paths and logger
         self.data_path = os.path.join(data_path, split)
@@ -80,18 +92,19 @@ class ONCEDataset(Dataset):
                 annotation_dict = json.load(f)
                 self.annotation_dicts.append(annotation_dict)
 
-        for path in self.cameras_paths:
-            self.logger.info(msg = f"Found camera data path: {path}")
-        for path in self.lidar_paths:
-            self.logger.info(msg = f"Found lidar data path: {path}")
-        for path in self.annotation_paths:
-            self.logger.info(msg = f"Found annotation path: {path}")
+        for record in annotation_dict:
+            number_of_frames = len(record["frames"])
 
-        self.logger.info(msg = f"ONCEDataset(data_path={self.data_path}, annotation_path={self.annotation_path})")
+        self.logger.info(msg = f"ONCEDataset(data_path={self.data_path}, annotation_path={self.annotation_path}, level={self.level}, len={self.__len__()})")
 
     def __len__(self):
-        # Retorna el tamaño del dataset
-        return 1000  # Valor de ejemplo
+        if self.level == "record":
+            return len(self.annotation_dicts)
+        elif self.level == "frame":
+            match self.data_type:
+                case "camera":
+                    return sum([ len(anno_dict["frames"]) for anno_dict in self.annotation_dicts])
+                
 
     def __getitem__(self, idx):
         # Retorna un ítem del dataset

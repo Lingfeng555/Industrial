@@ -488,3 +488,10 @@
 [2025-11-08 11:59:25] [ONCEDataset] [INFO]: Found annotation path: /home/lingfeng/Desktop/DATA/ONCE/val/annotation/000028/000028.json
 [2025-11-08 11:59:25] [ONCEDataset] [INFO]: Found annotation path: /home/lingfeng/Desktop/DATA/ONCE/val/annotation/000027/000027.json
 [2025-11-08 11:59:25] [ONCEDataset] [INFO]: ONCEDataset(data_path=/home/lingfeng/Desktop/DATA/ONCE/val, annotation_path=/home/lingfeng/Desktop/DATA/ONCE/val/annotation)
+[2025-11-09 12:50:33] [ONCEDataset] [INFO]: ONCEDataset(data_path=/home/lingfeng/Desktop/DATA/ONCE/val, annotation_path=/home/lingfeng/Desktop/DATA/ONCE/val/annotation, level=record, len=4)
+[2025-11-09 12:51:14] [ONCEDataset] [INFO]: ONCEDataset(data_path=/home/lingfeng/Desktop/DATA/ONCE/val, annotation_path=/home/lingfeng/Desktop/DATA/ONCE/val/annotation, level=record, len=4)
+[2025-11-09 12:51:14] [ONCEDataset] [INFO]: ONCEDataset(data_path=/home/lingfeng/Desktop/DATA/ONCE/val, annotation_path=/home/lingfeng/Desktop/DATA/ONCE/val/annotation, level=capture, len=None)
+[2025-11-09 12:51:44] [ONCEDataset] [INFO]: ONCEDataset(data_path=/home/lingfeng/Desktop/DATA/ONCE/val, annotation_path=/home/lingfeng/Desktop/DATA/ONCE/val/annotation, level=record, len=4)
+[2025-11-09 12:51:45] [ONCEDataset] [INFO]: ONCEDataset(data_path=/home/lingfeng/Desktop/DATA/ONCE/val, annotation_path=/home/lingfeng/Desktop/DATA/ONCE/val/annotation, level=capture, len=None)
+[2025-11-09 12:52:02] [ONCEDataset] [INFO]: ONCEDataset(data_path=/home/lingfeng/Desktop/DATA/ONCE/val, annotation_path=/home/lingfeng/Desktop/DATA/ONCE/val/annotation, level=record, len=4)
+[2025-11-09 12:52:02] [ONCEDataset] [INFO]: ONCEDataset(data_path=/home/lingfeng/Desktop/DATA/ONCE/val, annotation_path=/home/lingfeng/Desktop/DATA/ONCE/val/annotation, level=frame, len=6648)
