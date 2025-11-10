@@ -1,5 +1,4 @@
 import os
-import polars as pl
 import argparse
     
 from args import args
@@ -10,6 +9,7 @@ def main(args: argparse.Namespace):
     print("Cargando datos desde:", splits)
 
     dataset = ONCEDataset(data_path=args.data_path, split=splits[0], data_type="camera", level="record")
+    print(dataset[1])
     dataset = ONCEDataset(data_path=args.data_path, split=splits[0], data_type="lidar", level="frame")
     ...
 

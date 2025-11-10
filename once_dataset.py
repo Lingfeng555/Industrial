@@ -1,3 +1,5 @@
+import torch
+from torchvision.io import read_image
 from torch.utils.data import Dataset
 from typing import Literal
 import os
@@ -18,10 +20,12 @@ class ONCEDataset(Dataset):
     split: Literal["train", "val", "test"]
     
     # Internal variables
-    cameras_paths: list[str]
+    cameras: list[str]
     lidar_paths: list[str]
     annotation_paths: list[str]
-    annotation_dicts: list[dict]
+    annotation_dicts: dict[str, dict]
+    accumulative_frame_counts: list[tuple[str, int]]
+    frame_indexs: list[tuple[str, dict]]
 
     # Internal variables
     logger: CustomLogger
@@ -40,10 +44,7 @@ class ONCEDataset(Dataset):
                  level: Literal["frame", "record"], 
                  logger_name: str = "ONCEDataset", 
                  show_logs: bool = True):
-        '''
-
-        '''
-
+        
         # Initialize dataset paths and logger
         self.data_path = os.path.join(data_path, split)
         self.annotation_path = os.path.join(data_path, split, ANNOTATION_FOLDER_NAME)
@@ -51,10 +52,11 @@ class ONCEDataset(Dataset):
         self.data_type = data_type
         self.level = level
         self.logger = CustomLogger(logger_name, show_logs=show_logs).get_logger()
-        self.cameras_paths = []
         self.lidar_paths = []
         self.annotation_paths = []
-        self.annotation_dicts = []
+        self.annotation_dicts = {}
+        self.accumulative_frame_counts = []
+        self.frame_indexs = []
 
         # Validate data directories
         camera_dirs = os.listdir(os.path.join(self.data_path, "camera"))
@@ -73,7 +75,7 @@ class ONCEDataset(Dataset):
             for sensor in sensors:
                 path = os.path.join(record_path, sensor)
                 assert os.path.exists(path), f"Camera sensor path does not exist: {path}"
-                self.cameras_paths.append(path)
+        self.cameras = sensors
 
         # Load lidar data paths
         records = lidar_dirs
@@ -90,22 +92,68 @@ class ONCEDataset(Dataset):
 
             with open(path, 'r') as f:
                 annotation_dict = json.load(f)
-                self.annotation_dicts.append(annotation_dict)
+                self.annotation_dicts[record] = annotation_dict
 
-        for record in annotation_dict:
-            number_of_frames = len(record["frames"])
+        # Precompute accumulative frame counts for indexing
+        accumulative_count = 0
+        for record in self.annotation_dicts.keys():
+            accumulative_count += len(self.annotation_dicts[record]["frames"])
+            self.accumulative_frame_counts.append( (record, accumulative_count) )
+
+        # Precompute frame index mapping
+        for index in range(self.accumulative_frame_counts[-1][1]):
+            record, frame_info = self._find_record_and_frame(index)
+            if 'annos' in frame_info.keys():  # filter out frames without annos information, not sure why they exist
+                self.frame_indexs.append( (record, frame_info) )
 
         self.logger.info(msg = f"ONCEDataset(data_path={self.data_path}, annotation_path={self.annotation_path}, level={self.level}, len={self.__len__()})")
 
     def __len__(self):
-        if self.level == "record":
-            return len(self.annotation_dicts)
-        elif self.level == "frame":
-            match self.data_type:
-                case "camera":
-                    return sum([ len(anno_dict["frames"]) for anno_dict in self.annotation_dicts])
+        return len(self.frame_indexs)
                 
+    def _find_record_and_frame(self, idx: int) -> tuple[str, dict]:
+        previous_accum_count = 0
+        for record, accum_count in self.accumulative_frame_counts:
+            if idx < accum_count:
+                relative_idx = idx - previous_accum_count
+                #print(record, relative_idx)
+                return record, self.annotation_dicts[record]["frames"][relative_idx]
+            previous_accum_count = accum_count
+        raise IndexError(f"Index {idx} out of range for dataset")
 
+    def frame_by_index(self, idx: int) -> tuple[str, dict]:
+        ret = {}
+        record, frame_info = self.frame_indexs[idx]
+        if self.data_type in ["camera", "both"]:
+            camera_data = {}
+            for camera in self.cameras:
+                frame_path = os.path.join(self.data_path, "camera", record, camera , frame_info["frame_id"] + ".jpg")
+                data = {
+                    "image_tensor": read_image(frame_path).float() / 255.0 if self.data_type in ["camera", "both"] else None,
+                    "entities": frame_info["annos"]["names"],
+                    "2D_bboxes": frame_info["annos"]["boxes_2d"][camera]
+                }
+                camera_data[camera] = data
+            ret["camera_data"] = camera_data
+        if self.data_type in ["lidar", "both"]:
+            lidar_path = os.path.join(self.data_path, "lidar", record, LIDAR_FOLDER_NAME , frame_info["frame_id"] + ".bin")
+            lidar_data = {
+                "points": torch.load(lidar_path) if self.data_type in ["lidar", "both"] else None,
+                "3D_bboxes": frame_info["annos"]["boxes_3d"]
+            }
+            ret["lidar_data"] = lidar_data
+
+        ret["metadata"] = self.annotation_dicts[record]["meta_info"]
+        ret["calibration"] = self.annotation_dicts[record]["calib"]
+        ret["entities"] = frame_info["annos"]["names"]
+        return ret
+    
     def __getitem__(self, idx):
-        # Retorna un ítem del dataset
-        return {"data": f"Sample {idx} from {self.split}"}  # Valor de ejemplo
+        if self.level == "frame":
+            return self.frame_by_index(idx)
+        elif self.level == "record": # Return frame data along with next frame index for a future feasible dreamer
+            return (self.frame_by_index(idx), self.frame_indexs[idx+1])
+        else:
+            raise ValueError(f"Invalid level: {self.level}")
+    
+        
