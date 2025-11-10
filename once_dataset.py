@@ -4,8 +4,9 @@ from torch.utils.data import Dataset
 from typing import Literal
 import os
 import json
-
+import time
 from src.CustomLogger import CustomLogger
+import numpy as np
 
 ANNOTATION_FOLDER_NAME = "annotation"
 LIDAR_FOLDER_NAME = "lidar_roof"
@@ -44,7 +45,8 @@ class ONCEDataset(Dataset):
                  level: Literal["frame", "record"], 
                  logger_name: str = "ONCEDataset", 
                  show_logs: bool = True):
-        
+        time_start = time.time()
+
         # Initialize dataset paths and logger
         self.data_path = os.path.join(data_path, split)
         self.annotation_path = os.path.join(data_path, split, ANNOTATION_FOLDER_NAME)
@@ -106,7 +108,8 @@ class ONCEDataset(Dataset):
             if 'annos' in frame_info.keys():  # filter out frames without annos information, not sure why they exist
                 self.frame_indexs.append( (record, frame_info) )
 
-        self.logger.info(msg = f"ONCEDataset(data_path={self.data_path}, annotation_path={self.annotation_path}, level={self.level}, len={self.__len__()})")
+        time_end = time.time()
+        self.logger.info(msg = f"ONCEDataset(data_path={self.data_path}, annotation_path={self.annotation_path}, level={self.level}, len={self.__len__()}); initialized in {time_end - time_start:.2f} seconds.")
 
     def __len__(self):
         return len(self.frame_indexs)
@@ -138,7 +141,7 @@ class ONCEDataset(Dataset):
         if self.data_type in ["lidar", "both"]:
             lidar_path = os.path.join(self.data_path, "lidar", record, LIDAR_FOLDER_NAME , frame_info["frame_id"] + ".bin")
             lidar_data = {
-                "points": torch.load(lidar_path) if self.data_type in ["lidar", "both"] else None,
+                "points": torch.from_numpy(np.fromfile(lidar_path, dtype=np.float32).reshape(-1, 4)) if self.data_type in ["lidar", "both"] else None,
                 "3D_bboxes": frame_info["annos"]["boxes_3d"]
             }
             ret["lidar_data"] = lidar_data
