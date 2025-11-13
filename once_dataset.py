@@ -60,33 +60,38 @@ class ONCEDataset(Dataset):
         self.accumulative_frame_counts = []
         self.frame_indexs = []
 
-        # Validate data directories
-        camera_dirs = os.listdir(os.path.join(self.data_path, "camera"))
-        lidar_dirs = os.listdir(os.path.join(self.data_path, "lidar"))
-        anno_dirs = os.listdir(self.annotation_path)
+        # Validate and sort data directories to ensure consistent ordering
+        camera_dirs = sorted(os.listdir(os.path.join(self.data_path, "camera")))
+        lidar_dirs = sorted(os.listdir(os.path.join(self.data_path, "lidar")))
+        anno_dirs = sorted(os.listdir(self.annotation_path))
 
-        assert len(camera_dirs) == len(anno_dirs) == len(lidar_dirs), "Data and annotation directories count do not match."
-        assert camera_dirs != None and anno_dirs != None and lidar_dirs != None, "Data or annotation directories are None."
-        assert camera_dirs == anno_dirs == lidar_dirs, f"Data directories {camera_dirs} and annotation directories {anno_dirs} do not match."
+        if not (len(camera_dirs) and len(lidar_dirs) and len(anno_dirs)):
+            raise ValueError(f"Missing data directories under {self.data_path}. camera:{camera_dirs}, lidar:{lidar_dirs}, anno:{anno_dirs}")
 
-        # Load camera data paths
+        if not (len(camera_dirs) == len(anno_dirs) == len(lidar_dirs)):
+            raise AssertionError("Data and annotation directories count do not match.")
+
+        # Load camera data paths: determine sensors from the first record and validate existence across records
         records = camera_dirs
+        first_record = records[0]
+        first_record_path = os.path.join(self.data_path, "camera", first_record)
+        sensors = sorted(os.listdir(first_record_path))
+        if not sensors:
+            raise ValueError(f"No camera sensors found in {first_record_path}")
+
         for record in records:
-            record_path = os.path.join(self.data_path, "camera", record)
-            sensors = os.listdir(record_path)
             for sensor in sensors:
-                path = os.path.join(record_path, sensor)
+                path = os.path.join(self.data_path, "camera", record, sensor)
                 assert os.path.exists(path), f"Camera sensor path does not exist: {path}"
         self.cameras = sensors
 
-        # Load lidar data paths
-        records = lidar_dirs
-        for record in records:
+        # Load lidar data paths (sorted)
+        for record in lidar_dirs:
             path = os.path.join(self.data_path, "lidar", record, LIDAR_FOLDER_NAME)
             assert os.path.exists(path), f"Lidar path does not exist: {path}"
             self.lidar_paths.append(path)
 
-        # Load the annotation paths
+        # Load the annotation paths (sorted)
         for record in anno_dirs:
             path = os.path.join(self.annotation_path, record, f"{record}.json")
             assert os.path.exists(path), f"Annotation path does not exist: {path}"
@@ -96,17 +101,23 @@ class ONCEDataset(Dataset):
                 annotation_dict = json.load(f)
                 self.annotation_dicts[record] = annotation_dict
 
-        # Precompute accumulative frame counts for indexing
+        # Precompute accumulative frame counts for indexing (use sorted order of records)
         accumulative_count = 0
-        for record in self.annotation_dicts.keys():
+        for record in sorted(self.annotation_dicts.keys()):
             accumulative_count += len(self.annotation_dicts[record]["frames"])
             self.accumulative_frame_counts.append( (record, accumulative_count) )
 
         # Precompute frame index mapping
-        for index in range(self.accumulative_frame_counts[-1][1]):
-            record, frame_info = self._find_record_and_frame(index)
-            if 'annos' in frame_info.keys():  # filter out frames without annos information, not sure why they exist
-                self.frame_indexs.append( (record, frame_info) )
+        if not self.accumulative_frame_counts:
+            # No frames found in annotations
+            self.logger.warning(msg=f"No frames found in annotations for {self.data_path}")
+        else:
+            total_frames = self.accumulative_frame_counts[-1][1]
+            for index in range(total_frames):
+                record, frame_info = self._find_record_and_frame(index)
+                # filter out frames without annos information
+                if isinstance(frame_info, dict) and 'annos' in frame_info and frame_info['annos'] is not None:
+                    self.frame_indexs.append( (record, frame_info) )
 
         time_end = time.time()
         self.logger.info(msg = f"ONCEDataset(data_path={self.data_path}, annotation_path={self.annotation_path}, level={self.level}, len={self.__len__()}); initialized in {time_end - time_start:.2f} seconds.")
@@ -126,6 +137,11 @@ class ONCEDataset(Dataset):
 
     def frame_by_index(self, idx: int) -> tuple[str, dict]:
         ret = {}
+        if not self.frame_indexs:
+            raise IndexError(f"Dataset contains no frame-level entries (len=0); cannot access index {idx}.")
+        if idx < 0 or idx >= len(self.frame_indexs):
+            raise IndexError(f"Index {idx} out of range for dataset with {len(self.frame_indexs)} frames.")
+
         record, frame_info = self.frame_indexs[idx]
         if self.data_type in ["camera", "both"]:
             camera_data = {}
@@ -134,7 +150,8 @@ class ONCEDataset(Dataset):
                 data = {
                     "image_tensor": read_image(frame_path).float() / 255.0 if self.data_type in ["camera", "both"] else None,
                     "entities": frame_info["annos"]["names"],
-                    "2D_bboxes": frame_info["annos"]["boxes_2d"][camera]
+                    "2D_bboxes": frame_info["annos"]["boxes_2d"][camera],
+                    "position": frame_info["pose"]
                 }
                 camera_data[camera] = data
             ret["camera_data"] = camera_data

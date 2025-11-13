@@ -1,14 +1,20 @@
 import os
-import argparse
 import time
 from args import args
 from once_dataset import ONCEDataset
+from src.visualizer import ONCEVisualizer
 
-def main(args: argparse.Namespace):
+
+def main():
+    visualizer = ONCEVisualizer()
+    
     splits = os.listdir(args.data_path)
-    print("Cargando datos desde:", splits)
-
+    
     for split in splits:
+        print(f"\n{'='*60}")
+        print(f"Processing split: {split}")
+        print(f"{'='*60}\n")
+        
         dataset = ONCEDataset(
             data_path=args.data_path,
             split=split,
@@ -17,12 +23,13 @@ def main(args: argparse.Namespace):
             logger_name=f"ONCEDataset_{split}",
             show_logs=True
         )
+        
         time_start = time.time()
-        for i in range(len(dataset)):
-            data = dataset[i]
+        visualizer.visualize_split(dataset, split)
         time_end = time.time()
-        print(f"Procesado {len(dataset)} frames del split '{split}' en {time_end - time_start:.2f} segundos.")
-    ...
+        
+        print(f"\nProcessed {len(dataset)} frames in {time_end - time_start:.2f} seconds.")
+
 
 if __name__ == "__main__":
-    main(args)
+    main()
