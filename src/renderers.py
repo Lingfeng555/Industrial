@@ -57,6 +57,10 @@ class MatplotlibRenderer(Renderer):
         self.max_trajectory_points = 50
         self.forward_arrow_length = 5.0
         
+        self.use_distance_coloring = True
+        self.distance_colormap = 'turbo'
+        self.max_distance = 80.0 
+        
         self._lidar_scatter = None
         self._trajectory_line = None
         self._current_pos_scatter = None
@@ -92,7 +96,11 @@ class MatplotlibRenderer(Renderer):
         ax_lidar.set_xlabel('X')
         ax_lidar.set_ylabel('Y')
         
-        self._lidar_scatter = ax_lidar.scatter([], [], s=1, color=self.lidar_color)
+        if self.use_distance_coloring:
+            self._lidar_scatter = ax_lidar.scatter([], [], s=1, c=[], cmap=self.distance_colormap, 
+                                                  vmin=0, vmax=self.max_distance)
+        else:
+            self._lidar_scatter = ax_lidar.scatter([], [], s=1, color=self.lidar_color)
         self._trajectory_line, = ax_lidar.plot([], [], c=self.trajectory_color, 
                                                linewidth=self.trajectory_line_width, marker='.')
         self._current_pos_scatter = ax_lidar.scatter([0], [0], color=self.current_position_color, 
@@ -130,6 +138,10 @@ class MatplotlibRenderer(Renderer):
         pose_array: Optional[np.ndarray],
     ):
         self._lidar_scatter.set_offsets(lidar_points[:, :2])
+        
+        if self.use_distance_coloring:
+            distances = np.sqrt(lidar_points[:, 0]**2 + lidar_points[:, 1]**2)
+            self._lidar_scatter.set_array(distances)
         
         current_pose = Pose.from_array(pose_array)
         self._render_trajectory_2d(current_pose)
