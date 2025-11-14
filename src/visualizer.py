@@ -2,8 +2,7 @@
 
 import numpy as np
 from typing import List, Optional
-from once_dataset import ONCEDataset
-
+from .once_dataset import ONCEDataset
 from .transforms import Pose, CoordinateTransformer
 from .trajectory import TrajectoryHistory
 from .renderers import MatplotlibRenderer, Renderer

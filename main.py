@@ -1,12 +1,12 @@
 import os
 import time
 from args import args
-from once_dataset import ONCEDataset
+from src.once_dataset import ONCEDataset
 from src.visualizer import ONCEVisualizer
 
 
 def main():
-    visualizer = ONCEVisualizer()
+    #visualizer = ONCEVisualizer()
     
     splits = os.listdir(args.data_path)
     
@@ -25,7 +25,7 @@ def main():
         )
         
         time_start = time.time()
-        visualizer.visualize_split(dataset, split)
+        #visualizer.visualize_split(dataset, split)
         time_end = time.time()
         
         print(f"\nProcessed {len(dataset)} frames in {time_end - time_start:.2f} seconds.")
