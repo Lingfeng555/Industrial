@@ -1,0 +1,6 @@
+train: /home/lingfeng/Desktop/DATA/ONCE/yolo/images/train
+val: /home/lingfeng/Desktop/DATA/ONCE/yolo/images/val
+test: /home/lingfeng/Desktop/DATA/ONCE/yolo/images/test
+
+nc: 5
+names: ['Car', 'Truck', 'Bus', 'Pedestrian', 'Cyclist']

@@ -5,10 +5,11 @@ from typing import Literal
 import os
 import json
 import time
-from CustomLogger import CustomLogger
+from .CustomLogger import CustomLogger
 import numpy as np
 from torchvision.transforms import ToPILImage
 import shutil
+from tqdm import tqdm
 
 ANNOTATION_FOLDER_NAME = "annotation"
 LIDAR_FOLDER_NAME = "lidar_roof"
@@ -269,10 +270,10 @@ def export_dataset_to_yolo_mp(
         initializer=_init_worker,
         initargs=(dataset, categories),
     ) as pool:
-        for _ in pool.imap_unordered(_export_single_frame, tasks):
-            pass  # you could add a tqdm, logging, etc. here
+       for _ in tqdm(pool.imap_unordered(_export_single_frame, tasks), total=len(tasks), desc="Exporting frames"):
+            pass
 
-class Once_yolo_dataset:
+class Once_yolo_dataset_Parser:
 
     data_path: str
     logger: CustomLogger
@@ -284,7 +285,7 @@ class Once_yolo_dataset:
         self.categories = ['Car', 'Truck', 'Bus', 'Pedestrian', 'Cyclist']
         self.num_workers = num_workers
 
-        if "yolo" not in os.listdir(self.data_path):
+        if "yolo" in os.listdir(self.data_path):
             self.logger.warning(msg=f"No 'yolo' folder found in {self.data_path}. Creating one.")
 
             yolo_split_path = os.path.join(self.data_path, "yolo")
@@ -319,14 +320,14 @@ class Once_yolo_dataset:
 
             eval_indices = list(range(len(eval_dataset)))
             self.logger.info(msg=f"Exporting val split to YOLO format at {val_images_path} and {val_labels_path}...")
-            export_dataset_to_yolo_mp(
-                dataset=eval_dataset,
-                indices=eval_indices,
-                images_dir=val_images_path,
-                labels_dir=val_labels_path,
-                categories=self.categories,
-                num_workers=self.num_workers
-            )
+            # export_dataset_to_yolo_mp(
+            #     dataset=eval_dataset,
+            #     indices=eval_indices,
+            #     images_dir=val_images_path,
+            #     labels_dir=val_labels_path,
+            #     categories=self.categories,
+            #     num_workers=self.num_workers
+            # )
 
             # ----------------- TRAIN / TEST SPLIT (from train_dataset) -----------------
             all_train_idx = list(range(len(train_dataset)))
@@ -339,32 +340,42 @@ class Once_yolo_dataset:
             train_images_path = os.path.join(images_folder_path, "train")
             train_labels_path = os.path.join(labels_folder_path, "train")
             self.logger.info(msg=f"Exporting train split to YOLO format at {train_images_path} and {train_labels_path}...")
-            export_dataset_to_yolo_mp(
-                dataset=train_dataset,
-                indices=train_indices,
-                images_dir=train_images_path,
-                labels_dir=train_labels_path,
-                categories=self.categories,
-                num_workers=self.num_workers
-            )
+            # export_dataset_to_yolo_mp(
+            #     dataset=train_dataset,
+            #     indices=train_indices,
+            #     images_dir=train_images_path,
+            #     labels_dir=train_labels_path,
+            #     categories=self.categories,
+            #     num_workers=self.num_workers
+            # )
 
             # TEST
             test_images_path = os.path.join(images_folder_path, "test")
             test_labels_path = os.path.join(labels_folder_path, "test")
             self.logger.info(msg=f"Exporting test split to YOLO format at {test_images_path} and {test_labels_path}...")
-            export_dataset_to_yolo_mp(
-                dataset=train_dataset,
-                indices=test_indices,
-                images_dir=test_images_path,
-                labels_dir=test_labels_path,
-                categories=self.categories,
-                num_workers=self.num_workers
-            )
+            # export_dataset_to_yolo_mp(
+            #     dataset=train_dataset,
+            #     indices=test_indices,
+            #     images_dir=test_images_path,
+            #     labels_dir=test_labels_path,
+            #     categories=self.categories,
+            #     num_workers=self.num_workers
+            # )
+
+            #generate data.yaml
+            data_yaml_path = os.path.join("data.yaml")
+            with open(data_yaml_path, "w") as f:
+                f.write(f"train: {train_images_path}\n")
+                f.write(f"val: {val_images_path}\n")
+                f.write(f"test: {test_images_path}\n\n")
+                f.write(f"nc: {len(self.categories)}\n")
+                f.write(f"names: {self.categories}\n")
 
 if __name__ == "__main__":
-    dataset = Once_yolo_dataset(
+    dataset = Once_yolo_dataset_Parser(
         data_path="/home/lingfeng/Desktop/DATA/ONCE/",
         logger_name="Once_yolo_dataset",
-        show_logs=True
+        show_logs=True,
+        num_workers=os.cpu_count()
     )
     #shutil.rmtree("/home/lingfeng/Desktop/DATA/ONCE/yolo")
