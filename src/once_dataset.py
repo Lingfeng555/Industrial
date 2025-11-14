@@ -176,4 +176,26 @@ class ONCEDataset(Dataset):
         else:
             raise ValueError(f"Invalid level: {self.level}")
     
+class ONCE_yolo_wrapper(Dataset):
+    
+    def __init__(self, once_dataset: ONCEDataset):
+        self.once_dataset = once_dataset
+
+    def __len__(self):
+        return len(self.once_dataset)
+
+    def __getitem__(self, idx):
+        item = self.once_dataset[idx]
+        image_tensor = item["camera_data"][self.camera_name]["image_tensor"]
+        bboxes = item["camera_data"][self.camera_name]['2D_bboxes']
+        labels = item["camera_data"][self.camera_name]['entities']
+
+        yolo_bboxes = []
+        for bbox, label in zip(bboxes, labels):
+            x1, y1, x2, y2 = bbox[:4]
+            class_id = self.once_dataset.entity_labels.index(label)
+            yolo_bboxes.append([class_id, x1, y1, x2, y2])
         
+        yolo_bboxes = torch.tensor(yolo_bboxes) if yolo_bboxes else torch.zeros((0, 5))
+
+        return image_tensor, yolo_bboxes
