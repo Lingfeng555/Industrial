@@ -5,8 +5,10 @@ from typing import Literal
 import os
 import json
 import time
-from src.CustomLogger import CustomLogger
+from CustomLogger import CustomLogger
 import numpy as np
+from torchvision.transforms import ToPILImage
+import shutil
 
 ANNOTATION_FOLDER_NAME = "annotation"
 LIDAR_FOLDER_NAME = "lidar_roof"
@@ -176,26 +178,170 @@ class ONCEDataset(Dataset):
         else:
             raise ValueError(f"Invalid level: {self.level}")
     
-class ONCE_yolo_wrapper(Dataset):
+class Once_yolo_dataset:
+
+    data_path: str
+    logger: CustomLogger
+    categories: list[str]
     
-    def __init__(self, once_dataset: ONCEDataset):
-        self.once_dataset = once_dataset
+    def __init__(self, data_path, logger_name="Once_yolo_dataset", show_logs=True):
+        self.data_path = data_path
+        self.logger = CustomLogger(logger_name, show_logs=show_logs).get_logger()
+        self.categories = ['Car', 'Truck', 'Bus', 'Pedestrian', 'Cyclist']
 
-    def __len__(self):
-        return len(self.once_dataset)
+        to_pil = ToPILImage()
 
-    def __getitem__(self, idx):
-        item = self.once_dataset[idx]
-        image_tensor = item["camera_data"][self.camera_name]["image_tensor"]
-        bboxes = item["camera_data"][self.camera_name]['2D_bboxes']
-        labels = item["camera_data"][self.camera_name]['entities']
+        if "yolo" not in os.listdir(self.data_path):
+            self.logger.warning(msg=f"No 'yolo' folder found in {self.data_path}. Creating one.")
 
-        yolo_bboxes = []
-        for bbox, label in zip(bboxes, labels):
-            x1, y1, x2, y2 = bbox[:4]
-            class_id = self.once_dataset.entity_labels.index(label)
-            yolo_bboxes.append([class_id, x1, y1, x2, y2])
-        
-        yolo_bboxes = torch.tensor(yolo_bboxes) if yolo_bboxes else torch.zeros((0, 5))
+            yolo_split_path = os.path.join(self.data_path, "yolo")
 
-        return image_tensor, yolo_bboxes
+            # Create yolo folder
+
+            os.makedirs(yolo_split_path)
+
+            train_dataset = ONCEDataset(
+                data_path=self.data_path,
+                split="train",
+                data_type="camera",
+                level="frame",
+                logger_name=f"ONCEDataset_train",
+                show_logs=show_logs
+            )
+            eval_dataset = ONCEDataset( 
+                data_path=self.data_path,
+                split="val",
+                data_type="camera",
+                level="frame",
+                logger_name=f"ONCEDataset_eval",
+                show_logs=show_logs
+            )
+
+            # Create YOLO folder structure
+
+            images_folder_path = os.path.join(yolo_split_path, "images")
+            labels_folder_path = os.path.join(yolo_split_path, "labels")
+            os.makedirs(images_folder_path, exist_ok=True)
+            os.makedirs(labels_folder_path, exist_ok=True)
+            
+            # Parse entire eval dataset to extract all images and annotations
+
+            val_images_path = os.path.join(images_folder_path, "val")
+            val_labels_path = os.path.join(labels_folder_path, "val")
+            os.makedirs(val_images_path, exist_ok=True)
+            os.makedirs(val_labels_path, exist_ok=True)
+
+            self.logger.info(msg=f"Processing evaluation dataset with {len(eval_dataset)} frames...")
+            frame_idx = 0
+            for i in range(len(eval_dataset)):
+                item = eval_dataset[i]
+                for cam in eval_dataset.cameras:
+                    image_tensor = item["camera_data"][cam]["image_tensor"]
+                    entities = item["camera_data"][cam]["entities"]
+                    bboxes = item["camera_data"][cam]['2D_bboxes']
+                    
+                    # Save image
+                    frame_path = os.path.join(val_images_path, f"{frame_idx:06d}.jpg")
+                    pil_img = to_pil(image_tensor) 
+                    pil_img.save(frame_path)
+
+                    # Save annotation in YOLO format
+                    label_path = os.path.join(val_labels_path, f"{frame_idx:06d}.txt")
+
+                    for entity, bbox in zip(entities, bboxes):
+                        if bbox[0] != -1:
+                            x1, y1, x2, y2 = bbox[:4]
+                            class_id = self.categories.index(entity)
+                            # Convert to YOLO format
+                            x_center = (x1 + x2) / 2 / eval_dataset.image_dimension[0]
+                            y_center = (y1 + y2) / 2 / eval_dataset.image_dimension[1]
+                            width = (x2 - x1) / eval_dataset.image_dimension[0]
+                            height = (y2 - y1) / eval_dataset.image_dimension[1]
+                            with open(label_path, 'a') as f:
+                                f.write(f"{class_id} {x_center} {y_center} {width} {height}\n")
+                    frame_idx += 1
+
+            # Split randomly the data into train and test folders (80-20 split)
+            all_train_idx = list(range(len(train_dataset)))
+            np.random.shuffle(all_train_idx)
+            split_idx = int(0.8 * len(all_train_idx))
+            train_indices = all_train_idx[:split_idx]
+            test_indices = all_train_idx[split_idx:]
+
+            train_images_path = os.path.join(images_folder_path, "train")
+            train_labels_path = os.path.join(labels_folder_path, "train")
+            os.makedirs(train_images_path, exist_ok=True)
+            os.makedirs(train_labels_path, exist_ok=True)
+
+            self.logger.info(msg=f"Processing training dataset with {len(train_indices)} frames...")
+            frame_idx = 0
+            for i in train_indices:
+                item = train_dataset[i]
+                for cam in train_dataset.cameras:
+                    image_tensor = item["camera_data"][cam]["image_tensor"]
+                    entities = item["camera_data"][cam]["entities"]
+                    bboxes = item["camera_data"][cam]['2D_bboxes']
+                    
+                    # Save image
+                    frame_path = os.path.join(train_images_path, f"{frame_idx:06d}.jpg")
+                    pil_img = to_pil(image_tensor) 
+                    pil_img.save(frame_path)
+
+                    # Save annotation in YOLO format
+                    label_path = os.path.join(train_labels_path, f"{frame_idx:06d}.txt")
+
+                    for entity, bbox in zip(entities, bboxes):
+                        if bbox[0] != -1:
+                            x1, y1, x2, y2 = bbox[:4]
+                            class_id = self.categories.index(entity)
+                            # Convert to YOLO format
+                            x_center = (x1 + x2) / 2 / train_dataset.image_dimension[0]
+                            y_center = (y1 + y2) / 2 / train_dataset.image_dimension[1]
+                            width = (x2 - x1) / train_dataset.image_dimension[0]
+                            height = (y2 - y1) / train_dataset.image_dimension[1]
+                            with open(label_path, 'a') as f:
+                                f.write(f"{class_id} {x_center} {y_center} {width} {height}\n")
+                    frame_idx += 1
+
+            test_images_path = os.path.join(images_folder_path, "test")
+            test_labels_path = os.path.join(labels_folder_path, "test")
+            os.makedirs(test_images_path, exist_ok=True)
+            os.makedirs(test_labels_path, exist_ok=True)
+            
+            self.logger.info(msg=f"Processing testing dataset with {len(test_indices)} frames...")
+            frame_idx = 0
+            for i in test_indices:
+                item = train_dataset[i]
+                for cam in train_dataset.cameras:
+                    image_tensor = item["camera_data"][cam]["image_tensor"]
+                    entities = item["camera_data"][cam]["entities"]
+                    bboxes = item["camera_data"][cam]['2D_bboxes']
+                    
+                    # Save image
+                    frame_path = os.path.join(test_images_path, f"{frame_idx:06d}.jpg")
+                    pil_img = to_pil(image_tensor) 
+                    pil_img.save(frame_path)
+
+                    # Save annotation in YOLO format
+                    label_path = os.path.join(test_labels_path, f"{frame_idx:06d}.txt")
+
+                    for entity, bbox in zip(entities, bboxes):
+                        if bbox[0] != -1:
+                            x1, y1, x2, y2 = bbox[:4]
+                            class_id = self.categories.index(entity)
+                            # Convert to YOLO format
+                            x_center = (x1 + x2) / 2 / train_dataset.image_dimension[0]
+                            y_center = (y1 + y2) / 2 / train_dataset.image_dimension[1]
+                            width = (x2 - x1) / train_dataset.image_dimension[0]
+                            height = (y2 - y1) / train_dataset.image_dimension[1]
+                            with open(label_path, 'a') as f:
+                                f.write(f"{class_id} {x_center} {y_center} {width} {height}\n")
+                    frame_idx += 1
+                
+if __name__ == "__main__":
+    dataset = Once_yolo_dataset(
+        data_path="/home/lingfeng/Desktop/DATA/ONCE/",
+        logger_name="Once_yolo_dataset",
+        show_logs=True
+    )
+    #shutil.rmtree("/home/lingfeng/Desktop/DATA/ONCE/yolo")
