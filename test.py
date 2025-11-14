@@ -79,6 +79,6 @@ model.train(
     data='data.yaml',  
     epochs=10,  
     imgsz=640,  
-    batch=8,  
+    batch=2,  
     name='yolov12m_once_train'
 )
