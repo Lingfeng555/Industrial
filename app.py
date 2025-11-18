@@ -12,8 +12,11 @@ from yolov12.ultralytics import YOLO
 from args import args
 from src.once_dataset import ONCEDataset
 
+
+# Load YOLOv12 model
 segmentation_model = YOLO(model="yolov12m.pt")
 
+# Load ONCE camera dataset
 camera_dataset = ONCEDataset(
     data_path=args.data_path,
     split="val",
@@ -23,11 +26,13 @@ camera_dataset = ONCEDataset(
     show_logs=False
 )
 
+# Initialize ToPILImage transform
 to_pil = ToPILImage()
 
-def yolo_inference(image: torch.Tensor) -> np.ndarray:
+# Define inference function
+def yolo_inference(image: torch.Tensor, confidence: float) -> np.ndarray:
     pil_img = to_pil(image * 255)
-    results = segmentation_model.predict(source=pil_img, imgsz=640, conf=0.25)
+    results = segmentation_model.predict(source=pil_img, imgsz=640, conf=confidence)
     pred_entities = results[0].boxes.xyxy.cpu().numpy()
     pred_classes = results[0].boxes.cls.cpu().numpy()
     pred_conf = results[0].boxes.conf.cpu().numpy()
@@ -53,12 +58,15 @@ def yolo_inference(image: torch.Tensor) -> np.ndarray:
 
     return pred_entities, image_rgb
 
+# Streamlit App
 st.title("Entities detection using camera data")
 st.write("Visualization of detected entities on camera images using YOLOv12m model.")
 
 selected_index = st.slider("Select Frame Index", 0, len(camera_dataset) - 1, 0)
+selected_cam = st.selectbox("Select Camera", options=list(camera_dataset[0]["camera_data"].keys()), index=0)
+selected_confidence = st.slider("Select Confidence Threshold", 0.0, 1.0, 0.25, 0.05)
 
-entities, bbbox_img = yolo_inference(camera_dataset[selected_index]["camera_data"]["cam01"]["image_tensor"])
+entities, bbbox_img = yolo_inference(camera_dataset[selected_index]["camera_data"][selected_cam]["image_tensor"], selected_confidence)
 
-st.image(bbbox_img, caption=f"Frame Index: {selected_index}", use_column_width=True)
+st.image(bbbox_img, caption=f"Frame Index: {selected_index}")
 st.write(f"Detected {len(entities)} entities in the selected frame.")
