@@ -3,6 +3,7 @@ import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 import random
+import torch
 from torchvision.transforms import ToPILImage
 
 sys.path.append('./yolov12')
@@ -22,6 +23,7 @@ train_dataset = ONCEDataset(
             show_logs=True
         )
 item = train_dataset[random.randint(0, len(train_dataset)-1)]
+to_pil = ToPILImage()
 
 # Parse to PIL
 image_tensor = item["camera_data"]["cam01"]["image_tensor"] * 255 # this is a torch.Tensor
