@@ -77,10 +77,10 @@ plt.savefig('detection_results.png', dpi=150, bbox_inches='tight')
 print("Results saved to 'detection_results.png'")
 plt.show()
 
-model.train(
-    data='data.yaml',  
-    epochs=10,  
-    imgsz=640,  
-    batch=2,  
-    name='yolov12m_once_train'
-)
+# model.train(
+#     data='data.yaml',  
+#     epochs=10,  
+#     imgsz=640,  
+#     batch=2,  
+#     name='yolov12m_once_train'
+# )
