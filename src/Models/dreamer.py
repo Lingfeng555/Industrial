@@ -4,10 +4,11 @@ from torch.distributions import kl_divergence, Independent, OneHotCategoricalStr
 import numpy as np
 import os
 
-from networks import RecurrentModel, PriorNet, PosteriorNet, RewardModel, ContinueModel, EncoderConv, DecoderConv, Actor, Critic
+from networks import RecurrentModel, PriorNet, PosteriorNet, RewardModel, ContinueModel, VAEConvEncoder, VAEConvDecoder, CNNRepresentationFusion, Actor, Critic
 from utils import computeLambdaValues, Moments
 from buffer import ReplayBuffer
 import imageio
+
 
 class Dreamer:
     def __init__(self, observationShape, actionSize, actionLow, actionHigh, device, config):
@@ -22,8 +23,9 @@ class Dreamer:
 
         self.actor           = Actor(self.fullStateSize, actionSize, actionLow, actionHigh, device,                                  config.actor          ).to(self.device)
         self.critic          = Critic(self.fullStateSize,                                                                            config.critic         ).to(self.device)
-        self.encoder         = EncoderConv(observationShape, self.config.encodedObsSize,                                             config.encoder        ).to(self.device)
-        self.decoder         = DecoderConv(self.fullStateSize, observationShape,                                                     config.decoder        ).to(self.device)
+        self.encoder         = [VAEConvEncoder(observationShape, self.config.encodedObsSize,                                             config.encoder        ).to(self.device) * 7]
+        self.decoder         = [VAEConvDecoder(self.fullStateSize, observationShape,                                                     config.decoder        ).to(self.device) * 7]
+        self.representationfusion = CNNRepresentationFusion(self.config.encodedObsSize, 7, config.representationFusion).to(self.device)
         self.recurrentModel  = RecurrentModel(config.recurrentSize, self.latentSize, actionSize,                                     config.recurrentModel ).to(self.device)
         self.priorNet        = PriorNet(config.recurrentSize, config.latentLength, config.latentClasses,                             config.priorNet       ).to(self.device)
         self.posteriorNet    = PosteriorNet(config.recurrentSize + config.encodedObsSize, config.latentLength, config.latentClasses, config.posteriorNet   ).to(self.device)
@@ -171,12 +173,20 @@ class Dreamer:
             action = torch.zeros(1, self.actionSize).to(self.device)
 
             observation = env.reset(seed= (seed + self.totalEpisodes if seed else None))
-            encodedObservation = self.encoder(torch.from_numpy(observation).float().unsqueeze(0).to(self.device))
+
+            encoded_observation = []
+
+            for camera in observation:
+                encoded_observation.append(self.encoder[i](torch.from_numpy(camera).float().unsqueeze(0).to(self.device)))
+
+            encoded_observation = torch.stack(encoded_observation, dim=0)
+
+            encoded_observation = self.representationfusion(encoded_observation).squeeze(0)
 
             currentScore, stepCount, done, frames = 0, 0, False, []
             while not done:
                 recurrentState      = self.recurrentModel(recurrentState, latentState, action)
-                latentState, _      = self.posteriorNet(torch.cat((recurrentState, encodedObservation.view(1, -1)), -1))
+                latentState, _      = self.posteriorNet(torch.cat((recurrentState, encoded_observation.view(1, -1)), -1))
 
                 action          = self.actor(torch.cat((recurrentState, latentState), -1))
                 actionNumpy     = action.cpu().numpy().reshape(-1)
@@ -191,7 +201,13 @@ class Dreamer:
                     targetWidth = (frame.shape[1] + macroBlockSize - 1)//macroBlockSize*macroBlockSize
                     frames.append(np.pad(frame, ((0, targetHeight - frame.shape[0]), (0, targetWidth - frame.shape[1]), (0, 0)), mode='edge'))
 
-                encodedObservation = self.encoder(torch.from_numpy(nextObservation).float().unsqueeze(0).to(self.device))
+                encoded_observation = []
+
+                for camera in nextObservation:
+                    encoded_observation.append(self.encoder[i](torch.from_numpy(camera).float().unsqueeze(0).to(self.device)))
+
+                encoded_observation = torch.stack(encoded_observation, dim=0)
+                encoded_observation = self.representationfusion(encoded_observation).squeeze(0)
                 observation = nextObservation
                 
                 currentScore += reward
@@ -216,8 +232,8 @@ class Dreamer:
             checkpointPath += '.pth'
 
         checkpoint = {
-            'encoder'               : self.encoder.state_dict(),
-            'decoder'               : self.decoder.state_dict(),
+            'encoder'               : [encoder.state_dict() for encoder in self.encoder],
+            'decoder'               : [decoder.state_dict() for decoder in self.decoder],
             'recurrentModel'        : self.recurrentModel.state_dict(),
             'priorNet'              : self.priorNet.state_dict(),
             'posteriorNet'          : self.posteriorNet.state_dict(),

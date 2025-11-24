@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Normal, Bernoulli, Independent, OneHotCategoricalStraightThrough, Beta
 from torch.distributions.utils import probs_to_logits
-from utils import sequentialModel1D
+from src.Models.utils import sequentialModel1D
 
 
 class RecurrentModel(nn.Module):
@@ -104,6 +104,16 @@ class ContinueModel(nn.Module):
     def forward(self, x):
         return Bernoulli(logits=self.network(x).squeeze(-1))
 
+class LatentDynamicsModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, mu, logvar):
+        sigma = torch.exp(0.5*logvar)
+        eps = torch.randn_like(logvar)
+        z = mu + eps*sigma
+
+        return z
 
 class VAEConvEncoder(nn.Module):
     def __init__(self, inputShape, outputSize, config):
@@ -114,15 +124,23 @@ class VAEConvEncoder(nn.Module):
         self.outputSize = outputSize
 
         self.convolutionalNet = nn.Sequential(
-            nn.Conv2d(channels,            self.config.depth*1, self.config.kernelSize, self.config.stride, padding=1), activation,
-            nn.Conv2d(self.config.depth*1, self.config.depth*2, self.config.kernelSize, self.config.stride, padding=1), activation,
-            nn.Conv2d(self.config.depth*2, self.config.depth*4, self.config.kernelSize, self.config.stride, padding=1), activation,
-            nn.Conv2d(self.config.depth*4, self.config.depth*8, self.config.kernelSize, self.config.stride, padding=1), activation,
-            nn.Flatten(),
-            nn.Linear(self.config.depth*8*(height // (self.config.stride ** 4))*(width // (self.config.stride ** 4)), outputSize), activation)
+            nn.Conv2d(3,32,kernel_size=4,stride=2, padding=0),
+            nn.Conv2d(32,64,kernel_size=4,stride=2, padding=0),
+            nn.Conv2d(64,128,kernel_size=4,stride=2, padding=0),
+            nn.Conv2d(128,256,kernel_size=4,stride=2, padding=0)
+        )
+
+        self.mu = nn.Linear(outputSize, outputSize)
+        self.logvar = nn.Linear(outputSize, outputSize)
 
     def forward(self, x):
-        return self.convolutionalNet(x).view(-1, self.outputSize)
+        x = self.convolutionalNet(x).view(-1, self.outputSize)
+
+        mu = self.mu(x)
+        logvar = self.logvar(x)
+        
+        return mu, logvar
+    
 
 
 class VAEConvDecoder(nn.Module):
@@ -131,18 +149,50 @@ class VAEConvDecoder(nn.Module):
         self.config = config
         self.channels, self.height, self.width = outputShape
         activation = getattr(nn, self.config.activation)()
-
+        
+        # Project latent vector to spatial feature maps
+        self.fc = nn.Linear(inputSize, 256 * 4 * 4)
+        
         self.network = nn.Sequential(
-            nn.Linear(inputSize, self.config.depth*32),
-            nn.Unflatten(1, (self.config.depth*32, 1)),
-            nn.Unflatten(2, (1, 1)),
-            nn.ConvTranspose2d(self.config.depth*32, self.config.depth*4, self.config.kernelSize,     self.config.stride),    activation,
-            nn.ConvTranspose2d(self.config.depth*4,  self.config.depth*2, self.config.kernelSize,     self.config.stride),    activation,
-            nn.ConvTranspose2d(self.config.depth*2,  self.config.depth*1, self.config.kernelSize + 1, self.config.stride),    activation,
-            nn.ConvTranspose2d(self.config.depth*1,  self.channels,       self.config.kernelSize + 1, self.config.stride))
+            nn.ConvTranspose2d(256, 128, kernel_size=5, stride=2, padding=0),
+            nn.ConvTranspose2d(128, 64, kernel_size=5, stride=2, padding=0),
+            nn.ConvTranspose2d(64, 32, kernel_size=6, stride=2, padding=0),
+            nn.ConvTranspose2d(32, 3, kernel_size=6, stride=2, padding=0)
+        )
 
     def forward(self, x):
-        return self.network(x)
+        # Reshape from (batch, latent_dim) -> (batch, 256, 4, 4)
+        x = self.fc(x)
+        x = x.view(-1, 256, 4, 4)
+        
+        output = self.network(x)
+        # Resize to match target dimensions if needed
+        if output.shape[2] != self.height or output.shape[3] != self.width:
+            output = torch.nn.functional.interpolate(output, size=(self.height, self.width), mode='bilinear', align_corners=False)
+        return output
+    
+class CNNRepresentationFusion(nn.Module):
+    def __init__(self, inputShape, outputSize):
+        super().__init__()
+        num_cameras, latent_dim = inputShape
+        
+        # Treat each camera's latent as a channel
+        self.conv_net = nn.Sequential(
+            nn.Conv1d(num_cameras, 32, kernel_size=3, padding=1), nn.GELU(),
+            nn.Conv1d(32, 64, kernel_size=3, padding=1), nn.GELU(),
+            nn.AdaptiveAvgPool1d(1)
+        )
+        
+        self.fc = nn.Linear(64, outputSize)
+
+    def forward(self, x):
+        # x shape: (batch, num_cameras, latent_dim)
+        # Conv1d expects: (batch, channels, sequence_length)
+        # So x is already in the right format with num_cameras as channels
+        x = self.conv_net(x)  # Output: (batch, 64, 1)
+        x = x.squeeze(-1)      # Output: (batch, 64)
+        x = self.fc(x)         # Output: (batch, outputSize)
+        return x
 
 
 class Actor(nn.Module):
