@@ -124,17 +124,26 @@ class VAEConvEncoder(nn.Module):
         self.outputSize = outputSize
 
         self.convolutionalNet = nn.Sequential(
-            nn.Conv2d(3,32,kernel_size=4,stride=2, padding=0),
-            nn.Conv2d(32,64,kernel_size=4,stride=2, padding=0),
-            nn.Conv2d(64,128,kernel_size=4,stride=2, padding=0),
-            nn.Conv2d(128,256,kernel_size=4,stride=2, padding=0)
+            nn.Conv2d(channels, 32, kernel_size=4, stride=2, padding=1),
+            activation,
+            nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=1),
+            activation,
+            nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1),
+            activation,
+            nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1),
+            activation,
+            nn.AdaptiveAvgPool2d((1, 1))  # Output: (batch, 256, 1, 1)
         )
-
+        
+        self.fc = nn.Linear(256, outputSize)
         self.mu = nn.Linear(outputSize, outputSize)
         self.logvar = nn.Linear(outputSize, outputSize)
 
     def forward(self, x):
-        x = self.convolutionalNet(x).view(-1, self.outputSize)
+        batch_size = x.shape[0]
+        x = self.convolutionalNet(x)  # (batch, 256, 1, 1)
+        x = x.view(batch_size, -1)    # (batch, 256)
+        x = self.fc(x)                # (batch, outputSize)
 
         mu = self.mu(x)
         logvar = self.logvar(x)
@@ -198,79 +207,27 @@ class CNNRepresentationFusion(nn.Module):
 class Actor(nn.Module):
     def __init__(self, inputSize, actionSize, actionLow, actionHigh, device, config):
         super().__init__()
+        actionSize *= 2
         self.config = config
-        self.action_dim = actionSize
-        
-        hidden_dim = config.get('actor_hidden_dim', 256)
-        self.shared_net = nn.Sequential(
-            nn.Linear(inputSize, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU()
-        )
-        
-        self.fc_alpha = nn.Linear(hidden_dim, actionSize)
-        self.fc_beta = nn.Linear(hidden_dim, actionSize)
-        self.sp = nn.Softplus()
-        
-        action_low_tensor = torch.tensor(actionLow, dtype=torch.float32, device=device)
-        action_high_tensor = torch.tensor(actionHigh, dtype=torch.float32, device=device)
-        self.register_buffer("actionScale", action_high_tensor - action_low_tensor)
-        self.register_buffer("actionLow", action_low_tensor)
-    
-    def forward(self, x, training=False):
-        features = self.shared_net(x)
-        
-        alpha = self.sp(self.fc_alpha(features)) + 1.0
-        beta = self.sp(self.fc_beta(features)) + 1.0
-        
-        #this was a recommendation by chatgpt
-        alpha = torch.clamp(alpha, min=1.0, max=15.0)
-        beta = torch.clamp(beta, min=1.0, max=15.0)
-        
-        distribution = Beta(alpha, beta)
-        
-        if training:
-            sample = distribution.rsample()
-        else:
-            sample = alpha / (alpha + beta)
-            
-        #this was also a recommendation by chatgpt
-        sample = torch.clamp(sample, min=1e-6, max=1.0 - 1e-6)
+        self.network = sequentialModel1D(inputSize, [self.config.hiddenSize]*self.config.numLayers, actionSize, self.config.activation)
+        self.register_buffer("actionScale", ((torch.tensor(actionHigh, device=device) - torch.tensor(actionLow, device=device)) / 2.0))
+        self.register_buffer("actionBias", ((torch.tensor(actionHigh, device=device) + torch.tensor(actionLow, device=device)) / 2.0))
 
-        action = sample * self.actionScale + self.actionLow
-        
+    def forward(self, x, training=False):
+        logStdMin, logStdMax = -5, 2
+        mean, logStd = self.network(x).chunk(2, dim=-1)
+        logStd = logStdMin + (logStdMax - logStdMin)/2*(torch.tanh(logStd) + 1) # (-1, 1) to (min, max)
+        std = torch.exp(logStd)
+
+        distribution = Normal(mean, std)
+        sample = distribution.sample()
+        sampleTanh = torch.tanh(sample)
+        action = sampleTanh*self.actionScale + self.actionBias
         if training:
             logprobs = distribution.log_prob(sample)
-
-            # this took me way too long to figure out
-            # change of variables for Tanh squashing
-            # see appendix C of https://arxiv.org/pdf/1801.01290.pdf
-
-            # this is a change of variable that accounts for the previously done transformations
-            # this is accounted for the division of the jacobian from the transformation
-            # which in log space is a subtraction
-            # specifically the tanh squashing, with a correction for the scale
-            # I WANT TO KILL MYSELF
-            # the +1e-6 is to prevent log(0)
-            # sorry for the mess, but if you are interested, this is called the log jacobian transformation formula
-            logprobs = logprobs - torch.log(self.actionScale + 1e-6)
-
-            # final log-probability of the executed (squashed+scaled) action
-            logprobs = logprobs.sum(dim=-1, keepdim=False)
-
-            # entropy because we want to measue randomness in the original space
-            # this is shannon's information theory entropy
-            # We pass this to the loss function to either maximize or minimize it
-            # how am I going to explain this to Asier ._.?
-            entropy = distribution.entropy() + torch.log(self.actionScale + 1e-6)
-            
-            # we add the log jacobian to the entropy because, even though
-            # they are independent, we will add them to the loss when optimizing
-            # remember that the log_jacobian represents the expected change of rate
-            entropy = entropy.sum(dim=-1, keepdim=False)
-            
-            return action, logprobs, entropy
+            logprobs -= torch.log(self.actionScale*(1 - sampleTanh.pow(2)) + 1e-6)
+            entropy = distribution.entropy()
+            return action, logprobs.sum(-1), entropy.sum(-1)
         else:
             return action
 
@@ -279,16 +236,50 @@ class Critic(nn.Module):
     def __init__(self, inputSize, config):
         super().__init__()
         self.config = config
-
-        layers = []
-        currentsize = inputSize
-        for _ in range(self.config.numLayers):
-            layers.append(nn.Linear(currentsize, self.config.hiddenSize))
-            layers.append(getattr(nn, self.config.activation)())
-            currentsize = self.config.hiddenSize
-        layers.append(nn.Linear(currentsize, 2))
-        self.network = nn.Sequential(*layers)
+        self.network = sequentialModel1D(inputSize, [self.config.hiddenSize]*self.config.numLayers, 2, self.config.activation)
 
     def forward(self, x):
         mean, logStd = self.network(x).chunk(2, dim=-1)
         return Normal(mean.squeeze(-1), torch.exp(logStd).squeeze(-1))
+
+
+class ActionPredictor(nn.Module):
+    """Predicts acceleration and steering angle from latent state"""
+    def __init__(self, inputSize, hiddenSize=256):
+        super().__init__()
+        
+        self.network = nn.Sequential(
+            nn.Linear(inputSize, hiddenSize),
+            nn.ReLU(),
+            nn.Linear(hiddenSize, hiddenSize),
+            nn.ReLU(),
+        )
+        
+        # Acceleration head (continuous, can be negative for braking)
+        self.acceleration_head = nn.Sequential(
+            nn.Linear(hiddenSize, 64),
+            nn.ReLU(),
+            nn.Linear(64, 2)  # mean and log_std
+        )
+        
+        # Steering angle head (continuous, bounded)
+        self.steering_head = nn.Sequential(
+            nn.Linear(hiddenSize, 64),
+            nn.ReLU(),
+            nn.Linear(64, 2)  # mean and log_std
+        )
+    
+    def forward(self, x):
+        features = self.network(x)
+        
+        # Acceleration prediction
+        acc_params = self.acceleration_head(features)
+        acc_mean, acc_logstd = acc_params.chunk(2, dim=-1)
+        acc_std = torch.exp(acc_logstd.clamp(-10, 2))
+        
+        # Steering prediction
+        steer_params = self.steering_head(features)
+        steer_mean, steer_logstd = steer_params.chunk(2, dim=-1)
+        steer_std = torch.exp(steer_logstd.clamp(-10, 2))
+        
+        return acc_mean.squeeze(-1), acc_std.squeeze(-1), steer_mean.squeeze(-1), steer_std.squeeze(-1)

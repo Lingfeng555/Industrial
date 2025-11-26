@@ -21,14 +21,32 @@ class Dreamer:
         self.latentSize     = config.latentLength*config.latentClasses
         self.fullStateSize  = config.recurrentSize + self.latentSize
 
+        self.numCameras      = 7
+        self.fusedSize       = config.encodedObsSize * 4  # Output size from CNNRepresentationFusion
+        
         self.actor           = Actor(self.fullStateSize, actionSize, actionLow, actionHigh, device,                                  config.actor          ).to(self.device)
         self.critic          = Critic(self.fullStateSize,                                                                            config.critic         ).to(self.device)
-        self.encoder         = [VAEConvEncoder(observationShape, self.config.encodedObsSize,                                             config.encoder        ).to(self.device) * 7]
-        self.decoder         = [VAEConvDecoder(self.fullStateSize, observationShape,                                                     config.decoder        ).to(self.device) * 7]
-        self.representationfusion = CNNRepresentationFusion(self.config.encodedObsSize, 7, config.representationFusion).to(self.device)
+        
+        # Create separate encoder/decoder for each camera (using list comprehension, NOT multiplication)
+        self.encoder         = nn.ModuleList([
+            VAEConvEncoder(observationShape, self.config.encodedObsSize, config.encoder).to(self.device) 
+            for _ in range(self.numCameras)
+        ])
+        self.decoder         = nn.ModuleList([
+            VAEConvDecoder(self.fullStateSize, observationShape, config.decoder).to(self.device) 
+            for _ in range(self.numCameras)
+        ])
+        
+        # Fusion network: takes (numCameras, encodedObsSize) input, outputs fusedSize
+        self.representationfusion = CNNRepresentationFusion(
+            inputShape=(self.numCameras, self.config.encodedObsSize), 
+            outputSize=self.fusedSize
+        ).to(self.device)
+        
         self.recurrentModel  = RecurrentModel(config.recurrentSize, self.latentSize, actionSize,                                     config.recurrentModel ).to(self.device)
         self.priorNet        = PriorNet(config.recurrentSize, config.latentLength, config.latentClasses,                             config.priorNet       ).to(self.device)
-        self.posteriorNet    = PosteriorNet(config.recurrentSize + config.encodedObsSize, config.latentLength, config.latentClasses, config.posteriorNet   ).to(self.device)
+        # PosteriorNet needs to take fusedSize instead of encodedObsSize for multi-camera input
+        self.posteriorNet    = PosteriorNet(config.recurrentSize + self.fusedSize, config.latentLength, config.latentClasses,        config.posteriorNet   ).to(self.device)
         self.rewardPredictor = RewardModel(self.fullStateSize,                                                                       config.reward         ).to(self.device)
         if config.useContinuationPrediction:
             self.continuePredictor  = ContinueModel(self.fullStateSize,                                                              config.continuation   ).to(self.device)
@@ -36,8 +54,17 @@ class Dreamer:
         self.buffer         = ReplayBuffer(observationShape, actionSize, config.buffer, device)
         self.valueMoments   = Moments(device)
 
-        self.worldModelParameters = (list(self.encoder.parameters()) + list(self.decoder.parameters()) + list(self.recurrentModel.parameters()) +
-                                     list(self.priorNet.parameters()) + list(self.posteriorNet.parameters()) + list(self.rewardPredictor.parameters()))
+        # Collect world model parameters from all encoders and decoders
+        self.worldModelParameters = []
+        for enc in self.encoder:
+            self.worldModelParameters.extend(enc.parameters())
+        for dec in self.decoder:
+            self.worldModelParameters.extend(dec.parameters())
+        self.worldModelParameters.extend(self.representationfusion.parameters())
+        self.worldModelParameters.extend(self.recurrentModel.parameters())
+        self.worldModelParameters.extend(self.priorNet.parameters())
+        self.worldModelParameters.extend(self.posteriorNet.parameters())
+        self.worldModelParameters.extend(self.rewardPredictor.parameters())
         if self.config.useContinuationPrediction:
             self.worldModelParameters += list(self.continuePredictor.parameters())
 
@@ -51,15 +78,40 @@ class Dreamer:
 
 
     def worldModelTraining(self, data):
-        encodedObservations = self.encoder(data.observations.view(-1, *self.observationShape)).view(self.config.batchSize, self.config.batchLength, -1)
-        previousRecurrentState  = torch.zeros(self.config.batchSize, self.recurrentSize,    device=self.device)
-        previousLatentState     = torch.zeros(self.config.batchSize, self.latentSize,       device=self.device)
+        # data.observations shape: (batchSize, batchLength, numCameras, *observationShape)
+        # Encode each camera separately and then fuse
+        batchSize = self.config.batchSize
+        batchLength = self.config.batchLength
+        
+        # Encode all cameras for all timesteps
+        encoded_all_cameras = []
+        for cam_idx in range(self.numCameras):
+            # Extract observations for this camera: (batchSize, batchLength, C, H, W)
+            cam_obs = data.observations[:, :, cam_idx]
+            # Encode: flatten batch and time, then reshape
+            encoded = self.encoder[cam_idx](cam_obs.view(-1, *self.observationShape))
+            encoded = encoded.view(batchSize, batchLength, -1)
+            encoded_all_cameras.append(encoded)
+        
+        # Stack cameras: (batchSize, batchLength, numCameras, encodedObsSize)
+        encoded_stacked = torch.stack(encoded_all_cameras, dim=2)
+        
+        # Fuse camera representations for each timestep
+        fusedObservations = []
+        for t in range(batchLength):
+            # (batchSize, numCameras, encodedObsSize)
+            fused = self.representationfusion(encoded_stacked[:, t])
+            fusedObservations.append(fused)
+        fusedObservations = torch.stack(fusedObservations, dim=1)  # (batchSize, batchLength, fusedSize)
+        
+        previousRecurrentState  = torch.zeros(batchSize, self.recurrentSize, device=self.device)
+        previousLatentState     = torch.zeros(batchSize, self.latentSize, device=self.device)
 
         recurrentStates, priorsLogits, posteriors, posteriorsLogits = [], [], [], []
         for t in range(1, self.config.batchLength):
             recurrentState              = self.recurrentModel(previousRecurrentState, previousLatentState, data.actions[:, t-1])
             _, priorLogits              = self.priorNet(recurrentState)
-            posterior, posteriorLogits  = self.posteriorNet(torch.cat((recurrentState, encodedObservations[:, t]), -1))
+            posterior, posteriorLogits  = self.posteriorNet(torch.cat((recurrentState, fusedObservations[:, t]), -1))
 
             recurrentStates.append(recurrentState)
             priorsLogits.append(priorLogits)
@@ -75,9 +127,15 @@ class Dreamer:
         posteriorsLogits            = torch.stack(posteriorsLogits,             dim=1) # (batchSize, batchLength-1, latentLength, latentClasses)
         fullStates                  = torch.cat((recurrentStates, posteriors), dim=-1) # (batchSize, batchLength-1, recurrentSize + latentLength*latentClasses)
 
-        reconstructionMeans        =  self.decoder(fullStates.view(-1, self.fullStateSize)).view(self.config.batchSize, self.config.batchLength-1, *self.observationShape)
-        reconstructionDistribution =  Independent(Normal(reconstructionMeans, 1), len(self.observationShape))
-        reconstructionLoss         = -reconstructionDistribution.log_prob(data.observations[:, 1:]).mean()
+        # Reconstruct each camera separately
+        reconstructionLoss = torch.tensor(0.0, device=self.device)
+        for cam_idx in range(self.numCameras):
+            reconstructionMeans = self.decoder[cam_idx](fullStates.view(-1, self.fullStateSize)).view(
+                batchSize, self.config.batchLength-1, *self.observationShape
+            )
+            reconstructionDistribution = Independent(Normal(reconstructionMeans, 1), len(self.observationShape))
+            # data.observations shape: (batchSize, batchLength, numCameras, C, H, W)
+            reconstructionLoss += -reconstructionDistribution.log_prob(data.observations[:, 1:, cam_idx]).mean()
 
         rewardDistribution  =  self.rewardPredictor(fullStates)
         rewardLoss          = -rewardDistribution.log_prob(data.rewards[:, 1:].squeeze(-1)).mean()
@@ -174,14 +232,17 @@ class Dreamer:
 
             observation = env.reset(seed= (seed + self.totalEpisodes if seed else None))
 
-            encoded_observation = []
+            # Encode each camera with its corresponding encoder
+            encoded_cameras = []
+            for cam_idx, camera in enumerate(observation):
+                if cam_idx >= self.numCameras:
+                    break
+                encoded = self.encoder[cam_idx](torch.from_numpy(camera).float().unsqueeze(0).to(self.device))
+                encoded_cameras.append(encoded)
 
-            for camera in observation:
-                encoded_observation.append(self.encoder[i](torch.from_numpy(camera).float().unsqueeze(0).to(self.device)))
-
-            encoded_observation = torch.stack(encoded_observation, dim=0)
-
-            encoded_observation = self.representationfusion(encoded_observation).squeeze(0)
+            # Stack and fuse: (1, numCameras, encodedObsSize)
+            encoded_stacked = torch.stack(encoded_cameras, dim=1)
+            encoded_observation = self.representationfusion(encoded_stacked).squeeze(0)
 
             currentScore, stepCount, done, frames = 0, 0, False, []
             while not done:
@@ -201,13 +262,16 @@ class Dreamer:
                     targetWidth = (frame.shape[1] + macroBlockSize - 1)//macroBlockSize*macroBlockSize
                     frames.append(np.pad(frame, ((0, targetHeight - frame.shape[0]), (0, targetWidth - frame.shape[1]), (0, 0)), mode='edge'))
 
-                encoded_observation = []
+                # Encode next observation from all cameras
+                encoded_cameras = []
+                for cam_idx, camera in enumerate(nextObservation):
+                    if cam_idx >= self.numCameras:
+                        break
+                    encoded = self.encoder[cam_idx](torch.from_numpy(camera).float().unsqueeze(0).to(self.device))
+                    encoded_cameras.append(encoded)
 
-                for camera in nextObservation:
-                    encoded_observation.append(self.encoder[i](torch.from_numpy(camera).float().unsqueeze(0).to(self.device)))
-
-                encoded_observation = torch.stack(encoded_observation, dim=0)
-                encoded_observation = self.representationfusion(encoded_observation).squeeze(0)
+                encoded_stacked = torch.stack(encoded_cameras, dim=1)
+                encoded_observation = self.representationfusion(encoded_stacked).squeeze(0)
                 observation = nextObservation
                 
                 currentScore += reward
@@ -234,6 +298,7 @@ class Dreamer:
         checkpoint = {
             'encoder'               : [encoder.state_dict() for encoder in self.encoder],
             'decoder'               : [decoder.state_dict() for decoder in self.decoder],
+            'representationfusion'  : self.representationfusion.state_dict(),
             'recurrentModel'        : self.recurrentModel.state_dict(),
             'priorNet'              : self.priorNet.state_dict(),
             'posteriorNet'          : self.posteriorNet.state_dict(),
@@ -258,8 +323,14 @@ class Dreamer:
             raise FileNotFoundError(f"Checkpoint file not found at: {checkpointPath}")
         
         checkpoint = torch.load(checkpointPath, map_location=self.device)
-        self.encoder.load_state_dict(checkpoint['encoder'])
-        self.decoder.load_state_dict(checkpoint['decoder'])
+        
+        # Load each encoder/decoder individually
+        for idx, encoder_state in enumerate(checkpoint['encoder']):
+            self.encoder[idx].load_state_dict(encoder_state)
+        for idx, decoder_state in enumerate(checkpoint['decoder']):
+            self.decoder[idx].load_state_dict(decoder_state)
+        
+        self.representationfusion.load_state_dict(checkpoint['representationfusion'])
         self.recurrentModel.load_state_dict(checkpoint['recurrentModel'])
         self.priorNet.load_state_dict(checkpoint['priorNet'])
         self.posteriorNet.load_state_dict(checkpoint['posteriorNet'])
