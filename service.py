@@ -24,7 +24,8 @@ class YoloService:
     to_pil: ToPILImage
 
     def __init__(self):
-        self.model = YOLO("./yolov12m.pt")
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.model = YOLO("./yolov12m.pt").to(self.device)
         self.to_pil = ToPILImage()
 
     @bentoml.api

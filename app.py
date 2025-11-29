@@ -8,19 +8,19 @@ from torchvision.transforms import ToPILImage
 import torch
 import requests
 from args import args
-from src.once_dataset import ONCEDataset
 from io import BytesIO
 import bentoml
+import time
 
-# Load ONCE camera dataset
-camera_dataset = ONCEDataset(
-    data_path=args.data_path,
-    split="val",
-    data_type="camera",
-    level="frame",
-    logger_name=f"ONCEDataset_val",
-    show_logs=False
-)
+from src.once_dataset import ONCEDataset
+from car_simulator import Car
+
+available_cars = ["000027","000028", "000112", "000201"]
+cars = {}
+for id in available_cars:
+    cars[id] = Car(car_id=id, data_path=args.data_path)
+
+cams = cars[id].cams
 
 # Define inference function
 def yolo_api_inference(image: torch.Tensor, confidence: float) -> np.ndarray:
@@ -34,14 +34,33 @@ def yolo_api_inference(image: torch.Tensor, confidence: float) -> np.ndarray:
         return entities, bbbox_img
 
 # Streamlit App
-st.title("Entities detection using camera data")
-st.write("Visualization of detected entities on camera images using YOLOv12m model.")
+if "cam_busy" not in st.session_state:
+    st.session_state.cam_busy = False
 
-selected_index = st.slider("Select Frame Index", 0, len(camera_dataset) - 1, 0)
-selected_cam = st.selectbox("Select Camera", options=list(camera_dataset[0]["camera_data"].keys()), index=0)
+st.title("Driver Monitor")
+st.write("Visualize the driving experience of the agents")
+
+selected_car = st.selectbox("Select Car", options=available_cars, index=0)
+selected_cam = st.selectbox("Select Camera", options=cars[selected_car].cams, index=0)
 selected_confidence = st.slider("Select Confidence Threshold", 0.0, 1.0, 0.25, 0.05)
 
-entities, bbbox_img = yolo_api_inference(camera_dataset[selected_index]["camera_data"][selected_cam]["image_tensor"], selected_confidence)
+#Read in "real time"
+@st.fragment()  # Runs at 20 Hz
+@st.fragment(run_every="1500ms")
+def show_car_cam():
+    start = time.time()
+    car = cars[selected_car]
+    lidar_data, images = car.get_info()
+    image = images[selected_cam]
 
-st.image(bbbox_img, caption=f"Frame Index: {selected_index}")
-st.write(f"Detected {len(entities)} entities in the selected frame.")
+    print("Inference started")
+    entities, bbbox_img = yolo_api_inference(image, selected_confidence)
+    print("Inference completed")
+
+    st.image(bbbox_img, caption=f"From car {selected_car}") 
+    st.write(f"Detected {len(entities)} entities in the selected frame.")
+    st.write(f"Frame time: {time.time() - start:.3f}s")
+
+    st.session_state.cam_busy = False
+
+show_car_cam()
