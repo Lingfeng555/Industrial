@@ -4,3 +4,4 @@ data
 data/*
 *.pyc
 model/*
+yolov12/*
