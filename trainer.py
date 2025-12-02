@@ -481,46 +481,56 @@ class MultiCameraDreamerTrainer:
         print(f"Checkpoint loaded from {path}")
 
 
+class EncoderConfig:
+    def __init__(self):
+        self.activation = 'GELU'
+
+
+class DecoderConfig:
+    def __init__(self):
+        self.activation = 'GELU'
+
+
+class RecurrentConfig:
+    def __init__(self):
+        self.activation = 'GELU'
+        self.hiddenSize = 512
+
+
+class Config:
+    def __init__(self):
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        
+        # Image dimensions (downscaled for efficiency)
+        self.observationShape = (3, 192, 102)  # (C, H, W) - 10x smaller than original
+        
+        # Encoding sizes
+        self.encodedObsSize = 512
+        self.fusedSize = 1024
+        self.recurrentSize = 512
+        self.fullStateSize = self.recurrentSize + self.fusedSize
+        
+        # Training params
+        self.lr = 1e-4
+        self.action_loss_weight = 1.0
+        self.batchSize = 16
+        self.batchLength = 8  # Sequence length for world model training
+        
+        # Action predictor hidden size
+        self.actionPredictorHiddenSize = 256
+        
+        # Encoder config (matches VAEConvEncoder expectations)
+        self.encoder = EncoderConfig()
+        
+        # Decoder config (matches VAEConvDecoder expectations)
+        self.decoder = DecoderConfig()
+        
+        # Recurrent config (matches RecurrentModel expectations)
+        self.recurrent = RecurrentConfig()
+
+
 def main():
     # Configuration
-    class Config:
-        def __init__(self):
-            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-            
-            # Image dimensions (downscaled for efficiency)
-            self.observationShape = (3, 192, 102)  # (C, H, W) - 10x smaller than original
-            
-            # Encoding sizes
-            self.encodedObsSize = 512
-            self.fusedSize = 1024
-            self.recurrentSize = 512
-            self.fullStateSize = self.recurrentSize + self.fusedSize
-            
-            # Training params
-            self.lr = 1e-4
-            self.action_loss_weight = 1.0
-            self.batchSize = 16
-            self.batchLength = 8  # Sequence length for world model training
-            
-            # Action predictor hidden size
-            self.actionPredictorHiddenSize = 256
-            
-            # Encoder config (matches VAEConvEncoder expectations)
-            self.encoder = type('obj', (object,), {
-                'activation': 'GELU',
-            })()
-            
-            # Decoder config (matches VAEConvDecoder expectations)
-            self.decoder = type('obj', (object,), {
-                'activation': 'GELU',
-            })()
-            
-            # Recurrent config (matches RecurrentModel expectations)
-            self.recurrent = type('obj', (object,), {
-                'activation': 'GELU',
-                'hiddenSize': 512
-            })()
-    
     config = Config()
     print(f"Using device: {config.device}")
     
@@ -546,7 +556,7 @@ def main():
     print("Press 'q' in the visualization window to quit.\n")
     
     # Train
-    trainer.train(dataset, epochs=20, visualize=True)
+    trainer.train(dataset, epochs=1, visualize=False)
     
     # Save checkpoint
     trainer.save_checkpoint("dreamer_checkpoint.pth")
