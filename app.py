@@ -26,11 +26,19 @@ client = bentoml.SyncHTTPClient('http://localhost:3000')
 
 # Define inference function
 def yolo_api_inference(image: torch.Tensor, confidence: float) -> np.ndarray:
+    img_np = (image.permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
+    
+    img_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+    
+    _, buffer = cv2.imencode('.jpg', img_bgr)
+    img_base64_input = base64.b64encode(buffer).decode('utf-8')
+
     print("Sending inference request to YOLO service...")
-    response = client.yolo_inference(image=image, confidence=confidence)
+    
+    response = client.yolo_inference(image_b64=img_base64_input, confidence=confidence)
+    
     entities = response["pred_entities"]
     
-    # Decode Base64 string back to image
     img_data = base64.b64decode(response["image_base64"])
     bbbox_img = np.array(Image.open(BytesIO(img_data)))
     
@@ -49,8 +57,7 @@ selected_cam = st.selectbox("Select Camera", options=cars[selected_car].cams, in
 selected_confidence = st.slider("Select Confidence Threshold", 0.0, 1.0, 0.25, 0.05)
 
 #Read in "real time"
-@st.fragment()  # Runs at 20 Hz
-@st.fragment(run_every="150ms")
+@st.fragment(run_every=0.1)
 def show_car_cam():
     start = time.time()
     car = cars[selected_car]
