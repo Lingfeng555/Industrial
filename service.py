@@ -7,13 +7,14 @@ from pathlib import Path
 
 import bentoml
 import sys
+import base64  # Added import
 from bentoml.validators import ContentType
 
 import torch
 import numpy as np
 import cv2
 from torchvision.transforms import ToPILImage
-
+import time
 sys.path.append('./yolov12')
 from yolov12.ultralytics import YOLO
 
@@ -31,7 +32,9 @@ class YoloService:
     @bentoml.api
     def yolo_inference(self, image: torch.Tensor, confidence: float)-> dict[str, t.Any] :
         pil_img = self.to_pil(image)
+       
         results = self.model.predict(source=pil_img, imgsz=640, conf=confidence)
+        start = time.time()
         pred_entities = results[0].boxes.xyxy.cpu().numpy()
         pred_classes = results[0].boxes.cls.cpu().numpy()
         pred_conf = results[0].boxes.conf.cpu().numpy()
@@ -44,7 +47,7 @@ class YoloService:
             # Dibujar rectángulo
             cv2.rectangle(image_rgb, (x1, y1), (x2, y2), (0, 255, 0), 2)
             
-            # Obtener nombre de clase
+            # Obtener nombre de clasef
             class_name = self.model.names[int(cls_id)]
             label = f"{class_name} {conf:.2f}"
             
@@ -54,5 +57,10 @@ class YoloService:
             
             # Dibujar texto
             cv2.putText(image_rgb, label, (x1, y1 - 2), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+        
+        # Encode image to JPEG and then Base64 to avoid massive JSON payload
+        _, buffer = cv2.imencode('.jpg', image_rgb)
+        img_base64 = base64.b64encode(buffer).decode('utf-8')
 
-        return {"pred_entities": pred_entities.tolist(), "image_rgb": image_rgb.tolist()}
+        print(f"YOLO inference time: {time.time() - start:.3f}s")
+        return {"pred_entities": pred_entities.tolist(), "image_base64": img_base64}
