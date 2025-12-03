@@ -465,19 +465,36 @@ class MultiCameraDreamerTrainer:
             'representation_fusion': self.representation_fusion.state_dict(),
             'recurrent_model': self.recurrent_model.state_dict(),
             'action_predictor': self.action_predictor.state_dict(),
-            'config': self.config
+            'initial_recurrent_state': self.initial_recurrent_state.data,
+            'config_dict': {
+                'observationShape': self.config.observationShape,
+                'encodedObsSize': self.config.encodedObsSize,
+                'fusedSize': self.config.fusedSize,
+                'recurrentSize': self.config.recurrentSize,
+                'fullStateSize': self.config.fullStateSize,
+                'lr': self.config.lr,
+                'action_loss_weight': self.config.action_loss_weight,
+                'batchSize': self.config.batchSize,
+                'batchLength': self.config.batchLength,
+                'actionPredictorHiddenSize': self.config.actionPredictorHiddenSize,
+            }
         }
         torch.save(checkpoint, path)
         print(f"Checkpoint saved to {path}")
 
     def load_checkpoint(self, path):
         """Load model checkpoint"""
-        checkpoint = torch.load(path, map_location=self.device)
+        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
         self.encoders.load_state_dict(checkpoint['encoders'])
         self.decoders.load_state_dict(checkpoint['decoders'])
         self.representation_fusion.load_state_dict(checkpoint['representation_fusion'])
         self.recurrent_model.load_state_dict(checkpoint['recurrent_model'])
         self.action_predictor.load_state_dict(checkpoint['action_predictor'])
+        
+        # Load initial recurrent state if available
+        if 'initial_recurrent_state' in checkpoint:
+            self.initial_recurrent_state.data = checkpoint['initial_recurrent_state']
+        
         print(f"Checkpoint loaded from {path}")
 
 

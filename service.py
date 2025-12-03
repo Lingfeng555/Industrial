@@ -68,3 +68,37 @@ class YoloService:
 
         print(f"YOLO inference time: {time.time() - start:.3f}s")
         return {"pred_entities": pred_entities.tolist(), "image_base64": img_base64}
+
+
+@bentoml.service
+class ImageServerService:
+    
+    def __init__(self):
+        self.output_dir = Path("inference_outputs")
+        self.output_dir.mkdir(exist_ok=True)
+    
+    @bentoml.api
+    def get_image(self, filename: str) -> dict[str, t.Any]:
+        """Serve an image from inference_outputs directory as base64"""
+        file_path = self.output_dir / filename
+        
+        if not file_path.exists():
+            return {"error": f"Image {filename} not found"}
+        
+        try:
+            with open(file_path, "rb") as f:
+                image_data = f.read()
+            img_base64 = base64.b64encode(image_data).decode('utf-8')
+            return {"filename": filename, "image_base64": img_base64}
+        except Exception as e:
+            return {"error": str(e)}
+    
+    @bentoml.api
+    def list_images(self) -> dict[str, list[str]]:
+        """List all images in inference_outputs directory"""
+        image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.gif'}
+        images = [
+            f.name for f in self.output_dir.iterdir() 
+            if f.is_file() and f.suffix.lower() in image_extensions
+        ]
+        return {"images": sorted(images)}
