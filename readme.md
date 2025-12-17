@@ -34,9 +34,14 @@ git clone https://github.com/sunsmarterjie/yolov12.git
 python test.py
 ```
 
+### Antes de crear imagenes con el modelo debemos entrenar el modelo
+```bash
+python trainer.py --data_path [PATH-DE-LOS-DATOS]
+```
+
 ### Antes de arrancar streamlit crear imagenes con el modelo
 ```bash
-python inference.py
+python inference.py --data_path [PATH-DE-LOS-DATOS]
 ```
 
 ### Para arrancar la aplicacion de streamlit
