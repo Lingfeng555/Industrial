@@ -47,9 +47,9 @@ python inference.py --data_path [PATH-DE-LOS-DATOS]
 ### Para arrancar la aplicacion de streamlit
 
 ```bash
-bentoml serve service.py:YoloService --port 3000
-bentoml serve service.py:ImageServerService --port 3001
-streamlit run app.py
+bentoml serve service.py:YoloService --port 3000  &
+bentoml serve service.py:ImageServerService --port 3001 &
+streamlit run app.py -- --data_path [PATH-DE-LOS-DATOS]
 ```
 
 

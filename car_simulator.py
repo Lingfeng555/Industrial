@@ -15,7 +15,7 @@ class Car:
     frame_time: int
 
     def __init__(self, car_id: str, data_path: str):
-        self.data_path = os.path.join(os.path.expanduser(data_path), "ONCE", "val")
+        self.data_path = os.path.join(os.path.expanduser(data_path), "val")
         self.camera_fold = os.path.join(self.data_path, "camera")
         self.lidar_fold = os.path.join(self.data_path, "lidar")
         self.car_id = car_id
