@@ -19,7 +19,7 @@ from car_simulator import Car
 available_cars = ["000027","000028", "000112", "000201"]
 cars = {}
 for id in available_cars:
-    cars[id] = Car(car_id=id, data_path="/home/none3075/Desktop/asignaturas/industria/proyecto/Industrial/data")
+    cars[id] = Car(car_id=id, data_path=args.data_path)
 
 cams = cars[id].cams
 client = bentoml.SyncHTTPClient('http://localhost:3000')
