@@ -4,3 +4,5 @@ data
 data/*
 *.pyc
 model/*
+yolov12/*
+inference_outputs/*

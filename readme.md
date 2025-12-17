@@ -33,10 +33,17 @@ git clone https://github.com/sunsmarterjie/yolov12.git
 ```bash
 python test.py
 ```
+
+### Antes de arrancar streamlit crear imagenes con el modelo
+```bash
+python inference.py
+```
+
 ### Para arrancar la aplicacion de streamlit
 
 ```bash
-bentoml serve .
+bentoml serve service.py:YoloService --port 3000
+bentoml serve service.py:ImageServerService --port 3001
 streamlit run app.py
 ```
 
