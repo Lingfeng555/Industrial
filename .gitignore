@@ -6,3 +6,4 @@ data/*
 model/*
 yolov12/*
 inference_outputs/*
+lidar_clean/*
