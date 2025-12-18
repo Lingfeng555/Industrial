@@ -276,7 +276,7 @@ def bento_tab():
     st.header("🚗 Predicción de Velocidad con BentoML")
     
     # --- Configuración ---
-    BENTO_API_URL = "http://localhost:3000/predict_speed"  # Cambia a tu endpoint
+    BENTO_API_URL = "http://localhost:3002/predict_speed"  # Updated port for SpeedPredictionService
     TEST_FEATURES_PATH = "./test_bent.csv"  # Features para predicción
     TEST_TARGET_PATH = "./test_bent_y.csv"  # Valores reales de speed_y
     

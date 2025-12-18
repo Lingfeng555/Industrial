@@ -18,6 +18,10 @@ import time
 sys.path.append('./yolov12')
 from yolov12.ultralytics import YOLO
 
+# Add imports for speed prediction
+from sklearn.preprocessing import StandardScaler
+import pickle
+
 @bentoml.service(resources={"gpu": 1})
 class YoloService:
 
@@ -102,3 +106,31 @@ class ImageServerService:
             if f.is_file() and f.suffix.lower() in image_extensions
         ]
         return {"images": sorted(images)}
+
+# New: Speed Prediction Service
+@bentoml.service
+class SpeedPredictionService:
+    """Speed prediction service using trained regression model"""
+    
+    def __init__(self):
+        # Load model and scaler from processing directory or model store
+        try:
+            self.model = bentoml.sklearn.load_model("processing/model.pkl")
+            self.scaler = bentoml.picklable_model.load_model("processing/scaler.pkl")
+        except Exception as e:
+            print(f"Warning: Could not load models from BentoML store: {e}")
+            # Fallback: load from local files if available
+            self.model = None
+            self.scaler = None
+    
+    @bentoml.api
+    def predict_speed(self, input_data: list[list[float]]) -> list[float]:
+        """Predict speed from features"""
+        if self.model is None or self.scaler is None:
+            return {"error": "Model not loaded"}
+        
+        import numpy as np
+        data = np.array(input_data)
+        scaled_data = self.scaler.transform(data)
+        predictions = self.model.predict(scaled_data)
+        return predictions.tolist()

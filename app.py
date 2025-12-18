@@ -11,10 +11,15 @@ from args import args
 from io import BytesIO
 import bentoml
 import time
-import base64 # Added import
+import base64
 
 from src.once_dataset import ONCEDataset
 from car_simulator import Car
+
+# Import processing functions
+import sys
+sys.path.insert(0, './processing')
+from processing.app_final import train_models_tab, bento_tab
 
 available_cars = ["000027","000028", "000112", "000201"]
 cars = {}
@@ -56,8 +61,14 @@ if "current_image_index" not in st.session_state:
 st.title("Driver Monitor")
 st.write("Visualize the driving experience of the agents")
 
-# Create tabs for different views
-tab1, tab2 = st.tabs(["Live Camera", "Prediction Images"])
+# Create tabs for different views - EXPANDED
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "Live Camera", 
+    "Prediction Images",
+    "🤖 Train Models",
+    "🚗 Speed Predictor",
+    "📊 Data Analysis"
+])
 
 with tab1:
     selected_car = st.selectbox("Select Car", options=available_cars, index=0)
@@ -139,3 +150,16 @@ with tab2:
     except Exception as e:
         st.error(f"Could not connect to Image Server Service: {str(e)}")
         st.info("Make sure the ImageServerService is running on port 3001")
+
+with tab3:
+    # Integrated from processing/app_final.py
+    train_models_tab()
+
+with tab4:
+    # Integrated from processing/app_final.py
+    bento_tab()
+
+with tab5:
+    # Add data analysis features from processing/app_final.py
+    st.header("📊 Data Analysis Dashboard")
+    # Load and display correlation matrix, trajectories, etc.
