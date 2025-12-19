@@ -20,6 +20,7 @@ from yolov12.ultralytics import YOLO
 
 # Add imports for speed prediction
 from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import RandomForestRegressor
 import pickle
 
 @bentoml.service(resources={"gpu": 1})
@@ -107,30 +108,24 @@ class ImageServerService:
         ]
         return {"images": sorted(images)}
 
-# New: Speed Prediction Service
-@bentoml.service
+# Cargar runner del modelo 
+SCALER_TAG = "speed_scaler:latest"
+
+@bentoml.service()
 class SpeedPredictionService:
-    """Speed prediction service using trained regression model"""
-    
+    SUPPORTED_RESOURCES = ("cpu",)
+    SUPPORTS_CPU_MULTI_THREADING = True
+
     def __init__(self):
-        # Load model and scaler from processing directory or model store
-        try:
-            self.model = bentoml.sklearn.load_model("processing/model.pkl")
-            self.scaler = bentoml.picklable_model.load_model("processing/scaler.pkl")
-        except Exception as e:
-            print(f"Warning: Could not load models from BentoML store: {e}")
-            # Fallback: load from local files if available
-            self.model = None
-            self.scaler = None
-    
+        print("Cargando el scaler desde el Model Store...")
+        self.scaler = bentoml.picklable_model.load_model(SCALER_TAG)
+        regressor_path = "processing/model.pkl"
+        with open(regressor_path, "rb") as f:
+            self.model = pickle.load(f)
+
+        print("¡Scaler cargado!")
+
     @bentoml.api
-    def predict_speed(self, input_data: list[list[float]]) -> list[float]:
-        """Predict speed from features"""
-        if self.model is None or self.scaler is None:
-            return {"error": "Model not loaded"}
-        
-        import numpy as np
-        data = np.array(input_data)
-        scaled_data = self.scaler.transform(data)
-        predictions = self.model.predict(scaled_data)
-        return predictions.tolist()
+    def predict_speed(self, input_data: np.ndarray) -> np.ndarray:
+        features = self.scaler.transform(input_data)
+        return self.model.predict(features)

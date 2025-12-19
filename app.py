@@ -29,7 +29,7 @@ for id in available_cars:
 cams = cars[id].cams
 client = bentoml.SyncHTTPClient('http://localhost:3000')
 image_server_client = bentoml.SyncHTTPClient('http://localhost:3001')
-
+speed_prediction_client = bentoml.SyncHTTPClient('http://localhost:3002')
 # Define inference function
 def yolo_api_inference(image: torch.Tensor, confidence: float) -> np.ndarray:
     img_np = (image.permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
@@ -106,7 +106,7 @@ with tab1:
             strong_corr_df.columns = ['Variable 1', 'Variable 2', 'Correlación']
             strong_corr_df = strong_corr_df.drop_duplicates(subset=['Correlación'])
             strong_corr_df = strong_corr_df.sort_values('Correlación', ascending=False)
-            st.dataframe(strong_corr_df, use_container_width=True)
+            st.dataframe(strong_corr_df, width = "stretch")
         else:
             st.info("No hay correlaciones fuertes (>0.7) en esta secuencia") # solo estas
 
@@ -326,11 +326,11 @@ with tab4:
         
         # Mostrar tabla
         with st.expander("📊 Ver tabla de objetos"):
-            st.dataframe(obj_counts, use_container_width=True)
+            st.dataframe(obj_counts, width = "stretch")
     
     # 2. Estadísticas comparativas
     st.subheader("📈 Estadísticas Comparativas por Secuencia")
-    
+    width='content'
     # Calcular estadísticas para cada secuencia
     stats_list = []
     for seq_id, group in df_total.groupby('sequence_id'):
@@ -363,7 +363,7 @@ with tab4:
     stats_df = pd.DataFrame(stats_list)
     
     # Mostrar tabla
-    st.dataframe(stats_df, use_container_width=True)
+    st.dataframe(stats_df, width = "stretch")
     
     # Gráficos de barras comparativas
     fig_stats, axes = plt.subplots(2, 3, figsize=(16, 10))
@@ -573,7 +573,7 @@ with tab5:
                 )
                 
                 # Botón para analizar
-                if st.button("🔍 Analizar LIDAR", type="primary", use_container_width=True):
+                if st.button("🔍 Analizar LIDAR", type="primary", width = "stretch"):
                     if os.path.exists(bin_file):
                         # Analizar LIDAR
                         with st.spinner("Analizando datos LIDAR..."):
@@ -787,7 +787,7 @@ with tab5:
                         
                         # Mostrar tabla
                         stats_df = pd.DataFrame(stats_data)
-                        st.dataframe(stats_df, use_container_width=True, hide_index=True)
+                        st.dataframe(stats_df, width = "stretch", hide_index=True)
                         
                         # Métricas adicionales
                         col1, col2, col3 = st.columns(3)
@@ -913,7 +913,7 @@ with tab9:
                     img_data = base64.b64decode(img_response["image_base64"])
                     img = Image.open(BytesIO(img_data))
                     st.image(img, caption=f"{current_image} ({st.session_state.current_image_index + 1}/{len(images_list)})", width='stretch')
-            
+                    
             show_image_sequence()
             
             new_index = st.slider(

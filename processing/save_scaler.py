@@ -3,7 +3,7 @@ import joblib
 import bentoml
 import os
 
-SCALER_PATH = "scaler.pkl"
+SCALER_PATH = "processing/scaler.pkl"
 SCALER_NAME = "speed_scaler" 
 
 print(f"Guardando el scaler como '{SCALER_NAME}'...")

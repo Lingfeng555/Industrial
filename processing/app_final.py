@@ -15,6 +15,7 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_absolute_error, r2_score, f1_score, recall_score
+import bentoml
 
 # CÓDIGO DE ENTRENAMIENTO DE MODELOS
 def train_models_tab():
@@ -85,7 +86,7 @@ def train_models_tab():
         return y_true_binary, y_pred_binary
     
     # 4. Botón para entrenar
-    if st.button("🚀 Entrenar Modelo", type="primary", use_container_width=True):
+    if st.button("🚀 Entrenar Modelo", type="primary", width='stretch'):
         if not selected_features:
             st.error("❌ Selecciona al menos una característica")
         else:
@@ -205,7 +206,7 @@ def train_models_tab():
                     plt.tight_layout()
                     st.pyplot(fig_imp)
                     
-                    st.dataframe(importance_df, use_container_width=True)
+                    st.dataframe(importance_df, width='stretch')
                 
                 # Información del modelo
                 with st.expander("📋 Información del Modelo", expanded=False):
@@ -221,7 +222,7 @@ def train_models_tab():
                             'Coeficiente': model.coef_
                         })
                         st.write("**Coeficientes (Linear Regression):**")
-                        st.dataframe(coef_df, use_container_width=True)
+                        st.dataframe(coef_df, width='stretch')
                     
                     # Mostrar estadísticas de las métricas de clasificación
                     st.write("**Estadísticas de clasificación binaria:**")
@@ -260,9 +261,9 @@ def train_models_tab():
         st.write(f"**Primeras 5 filas de datos seleccionados:**")
         if selected_features:
             preview_cols = selected_features + [target] if target not in selected_features else selected_features
-            st.dataframe(df[preview_cols].head(), use_container_width=True)
+            st.dataframe(df[preview_cols].head(), width='stretch')
         else:
-            st.dataframe(df.head(), use_container_width=True)
+            st.dataframe(df.head(), width='stretch')
         
         st.write(f"**Estadísticas de target ({target}):**")
         st.write(f"- Promedio: {df[target].mean():.4f}")
@@ -275,6 +276,7 @@ def train_models_tab():
 def bento_tab():
     st.header("🚗 Predicción de Velocidad con BentoML")
     
+    speed_prediction_client = bentoml.SyncHTTPClient('http://localhost:3002')
     # --- Configuración ---
     BENTO_API_URL = "http://localhost:3002/predict_speed"  # Updated port for SpeedPredictionService
     TEST_FEATURES_PATH = "./test_bent.csv"  # Features para predicción
@@ -358,12 +360,12 @@ def bento_tab():
             tab1, tab2, tab3 = st.tabs(["📋 Datos Completos", "🎯 Features Clave", "📊 Valores"])
             
             with tab1:
-                st.dataframe(selected_row, use_container_width=True)
+                st.dataframe(selected_row, width='stretch')
             
             with tab2:
                 # Solo las 7 features del modelo
                 features_data = selected_row[TOP_7_FEATURES]
-                st.dataframe(features_data, use_container_width=True)
+                st.dataframe(features_data, width='stretch')
                 
                 # Gráfico de barras de las features
                 fig = go.Figure(data=[
@@ -376,7 +378,7 @@ def bento_tab():
                     yaxis_title="Valor",
                     height=300
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             
             with tab3:
                 col_a, col_b = st.columns(2)
@@ -395,29 +397,26 @@ def bento_tab():
                         features_data.max().max()
                     ]
                 })
-                st.dataframe(stats_df, use_container_width=True, hide_index=True)
+                st.dataframe(stats_df, width='stretch', hide_index=True)
         
         with col2:
             st.header("🎯 Predicción")
             
             # Botón grande para predicción
-            if st.button("**PREDECIR VELOCIDAD**", type="primary", use_container_width=True):
+            if st.button("**PREDECIR VELOCIDAD**", type="primary", width='stretch'):
                 with st.spinner("Consultando modelo BentoML..."):
                     try:
                         # Preparar datos para la API
                         data_for_prediction = selected_row[TOP_7_FEATURES]
-                        input_json = data_for_prediction.to_numpy().tolist()
+                        input_json = data_for_prediction.to_numpy()
                         
-                        # Llamar a la API
-                        response = requests.post(
-                            BENTO_API_URL, 
-                            json=input_json,
-                            timeout=10
-                        )
-                        
-                        if response.status_code == 200:
+                        # Llamar a la API   
+                        print("Enviando datos a la API de BentoML...")
+                        response = speed_prediction_client.predict_speed(input_data=input_json).tolist()[0]
+                        print(response)
+                        if True:
                             # Obtener predicción
-                            speed_prediction = response.json()[0]  # Ajusta según tu API
+                            speed_prediction = response
                             real_speed = selected_row['speed_y_real'].values[0]
                             
                             # Guardar en historial
@@ -485,7 +484,7 @@ def bento_tab():
                                 title="Comparación: Predicción vs Real",
                                 height=300
                             )
-                            st.plotly_chart(fig, use_container_width=True)
+                            st.plotly_chart(fig, width='stretch')
                             
                         else:
                             st.error(f"Error de la API ({response.status_code}): {response.text}")
@@ -501,6 +500,7 @@ def bento_tab():
                     except requests.exceptions.Timeout:
                         st.error("Timeout - La API tardó demasiado en responder")
                     except Exception as e:
+                        print(e)
                         pass
             else:
                 st.info("👆 Haz clic en el botón para predecir la velocidad")
@@ -529,8 +529,9 @@ def bento_tab():
                     yaxis_title="Velocidad (m/s)",
                     height=250
                 )
-                st.plotly_chart(fig_line, use_container_width=True)
+                st.plotly_chart(fig_line, width='stretch')
                 
+                print(hist_df.tail(5))
                 # Tabla resumen
                 st.dataframe(
                     hist_df.tail(5).style.format({
@@ -538,7 +539,7 @@ def bento_tab():
                         'real': '{:.3f}',
                         'error': '{:.3f}'
                     }),
-                    use_container_width=True,
+                    width='stretch',
                     hide_index=True
                 )
         
@@ -571,7 +572,7 @@ def bento_tab():
                 yaxis_title="Frecuencia",
                 height=300
             )
-            st.plotly_chart(fig_hist, use_container_width=True)
+            st.plotly_chart(fig_hist, width='stretch')
         
         else:
             st.info("Realiza varias predicciones para ver el análisis de error")

@@ -3,7 +3,7 @@ import joblib
 import bentoml
 import os
 
-MODEL_PATH = "./model.pkl" 
+MODEL_PATH = "processing/model.pkl" 
 MODEL_NAME = "speed_regression_model" # Nombre que tendrá en BentoML
 TOP_7_FEATURES = ['speed_y_avg_20', 'speed_x', 'speed_x_avg_20', 'lidar_n_points_total', 'lidar_intensity_mean', 'lidar_n_points_under_100m', 'lidar_points_10_20m'] # las 7 variables para entrenar el modelo
 
